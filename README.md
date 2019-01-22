@@ -5,11 +5,14 @@ My custom components for http://www.home-assistant.io
 Components List
 ---------------
 
- * [Samsung Air Conditioner Climate Component](#samsung-climate-component)
+ * [Samsung Air Conditioner Climate Component](#samsung-air-conditioner-climate-component)
 
 ## Samsung Air Conditioner Climate Component
 
-This allows you to control your samsung air conditioner basic functions: on/off, target temperature, mode (heat, cool, dry, ...)
+This allows you to control your samsung air conditioner basic functions: 
+  - on/off 
+  - target temperature 
+  - mode (heat, cool, dry, ...)
 
 This project is based on awesome work of cicciovo - https://github.com/cicciovo/homebridge-samsung-airconditioner
 
