@@ -69,7 +69,8 @@ class RoomAirConditioner(ClimateDevice):
         self._current_mode = ''
         self._current_temperature = None
         self._target_temperature = None
-        self._mode_list = ["Heat","Cool","Dry","Wind","Auto"]
+        self._mode_list = ['heat', 'cool', 'auto', 'off']
+        #["Heat","Cool","Dry","Wind","Auto"]
         #TODO: wind mode and direction?
 
         self._support_flags = SUPPORT_TARGET_TEMPERATURE | SUPPORT_OPERATION_MODE | SUPPORT_ON_OFF
@@ -87,7 +88,7 @@ class RoomAirConditioner(ClimateDevice):
             if len(result['Devices']) > 0:
                 device = result['Devices'][0]
                 self._is_on = device["Operation"]["power"] == 'On'
-                self._current_mode = device["Mode"]["modes"][0]
+                self._current_mode = device["Mode"]["modes"][0].lower() if self._is_on else 'off'
 
                 if len(device["Temperatures"]) > 0:
                     temp = device["Temperatures"][0]
@@ -163,9 +164,21 @@ class RoomAirConditioner(ClimateDevice):
         self.api_put_data('/0/temperatures/0', "{{\"desired\": {} }}".format(self._target_temperature))
 
     def set_operation_mode(self, operation_mode):
-        """Set new target temperature."""
+        """Set new operation mode."""
+        # Supported operation modes
+        # ["Heat","Cool","Dry","Wind","Auto"]
+
+        if self._current_mode == operation_mode:
+            return
+        
         self._current_mode = operation_mode
-        self.api_put_data('/0/mode', "{{\"modes\": [\"{}\"]}}".format(operation_mode))
+        
+        if operation_mode == "off" or operation_mode == "on":
+            self._is_on = operation_mode != "off"
+            self.api_put_data('/0', "{{\"Operation\" : {{\"power\" : \"{}\"}}}}".format(operation_mode.capitalize()))
+        else:
+            self._is_on = True
+            self.api_put_data('/0', "{{\"Operation\" : {{\"power\" : \"On\"}}, \"Mode\" : {{\"modes\": [\"{}\"] }}}}".format(operation_mode.capitalize()))
 
     def turn_on(self):
         """Turn on."""
