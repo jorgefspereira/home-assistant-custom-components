@@ -10,15 +10,17 @@ import logging
 import voluptuous as vol
 import homeassistant.helpers.config_validation as cv
 
-from homeassistant.components.climate import (
-    ClimateDevice, ATTR_TARGET_TEMP_HIGH, ATTR_TARGET_TEMP_LOW,
+from homeassistant.components.climate import ClimateDevice
+from homeassistant.components.climate.const import (
+    ATTR_TARGET_TEMP_HIGH, ATTR_TARGET_TEMP_LOW,
     SUPPORT_TARGET_TEMPERATURE, SUPPORT_TARGET_HUMIDITY,
     SUPPORT_TARGET_HUMIDITY_LOW, SUPPORT_TARGET_HUMIDITY_HIGH,
     SUPPORT_AWAY_MODE, SUPPORT_HOLD_MODE, SUPPORT_FAN_MODE,
     SUPPORT_OPERATION_MODE, SUPPORT_AUX_HEAT, SUPPORT_SWING_MODE,
     SUPPORT_TARGET_TEMPERATURE_HIGH, SUPPORT_TARGET_TEMPERATURE_LOW,
-    SUPPORT_ON_OFF, PLATFORM_SCHEMA)
+    SUPPORT_ON_OFF)
 from homeassistant.const import TEMP_CELSIUS, TEMP_FAHRENHEIT, ATTR_TEMPERATURE, CONF_HOST, CONF_DEVICES, CONF_NAME, CONF_PORT, CONF_TOKEN
+from homeassistant.helpers.config_validation import (PLATFORM_SCHEMA, PLATFORM_SCHEMA_BASE)
 
 DEVICE_CONFIG_SCHEMA = vol.Schema({
     vol.Required(CONF_HOST): vol.All(ipaddress.ip_address, cv.string),
@@ -100,6 +102,11 @@ class RoomAirConditioner(ClimateDevice):
     def supported_features(self):
         """Return the list of supported features."""
         return self._support_flags
+
+    @property
+    def assumed_state(self):
+        """Return the polling state."""
+        return True
 
     @property
     def should_poll(self):
