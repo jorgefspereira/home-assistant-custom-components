@@ -1,8 +1,4 @@
-"""
-
-Samsung climate platform.
-
-"""
+"""Samsung climate platform for Home Assistant."""
 
 import ipaddress
 import asyncio
@@ -12,31 +8,19 @@ import logging
 import voluptuous as vol
 import homeassistant.helpers.config_validation as cv
 
-from homeassistant.components.climate import ClimateDevice
+from homeassistant.components.climate import ClimateEntity
 
 from homeassistant.components.climate.const import (
     ATTR_HVAC_MODE,
     ATTR_TARGET_TEMP_HIGH,
     ATTR_TARGET_TEMP_LOW,
-    CURRENT_HVAC_COOL,
-    CURRENT_HVAC_FAN,
-    CURRENT_HVAC_HEAT,
-    CURRENT_HVAC_IDLE,
-    HVAC_MODE_AUTO,
-    HVAC_MODE_COOL,
-    HVAC_MODE_DRY,
-    HVAC_MODE_FAN_ONLY,
-    HVAC_MODE_HEAT,
-    HVAC_MODE_HEAT_COOL,
-    HVAC_MODE_OFF,
-    SUPPORT_FAN_MODE,
-    SUPPORT_TARGET_TEMPERATURE,
-    SUPPORT_TARGET_TEMPERATURE_RANGE
+    HVACAction,
+    HVACMode,
+    ClimateEntityFeature
 )
 
 from homeassistant.const import (
-    TEMP_CELSIUS, 
-    TEMP_FAHRENHEIT, 
+    UnitOfTemperature, 
     ATTR_TEMPERATURE, 
     CONF_HOST, 
     CONF_DEVICES, 
@@ -50,38 +34,41 @@ from homeassistant.helpers.config_validation import (
     PLATFORM_SCHEMA_BASE
 )
 
+# Configuration constants
+CONF_CERT_PATH = "cert_path"
+
 DEVICE_CONFIG_SCHEMA = vol.Schema({
     vol.Required(CONF_HOST): vol.All(ipaddress.ip_address, cv.string),
     vol.Optional(CONF_NAME, default='RAC'): cv.string,
     vol.Required(CONF_PORT): cv.string,
     vol.Required(CONF_TOKEN): cv.string,
+    vol.Optional(CONF_CERT_PATH): cv.string,
 })
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Optional(CONF_HOST): cv.string,
     vol.Optional(CONF_DEVICES): vol.All(cv.ensure_list, [DEVICE_CONFIG_SCHEMA]),
-
 })
 
 
 AC_MODE_TO_HVAC = {
-    "auto": HVAC_MODE_HEAT_COOL,
-    "cool": HVAC_MODE_COOL,
-    "dry": HVAC_MODE_DRY,
-    "coolClean": HVAC_MODE_COOL,
-    "dryClean": HVAC_MODE_DRY,
-    "heat": HVAC_MODE_HEAT,
-    "heatClean": HVAC_MODE_HEAT,
-    "fanOnly": HVAC_MODE_FAN_ONLY,
-    "wind": HVAC_MODE_FAN_ONLY,
+    "auto": HVACMode.HEAT_COOL,
+    "cool": HVACMode.COOL,
+    "dry": HVACMode.DRY,
+    "coolClean": HVACMode.COOL,
+    "dryClean": HVACMode.DRY,
+    "heat": HVACMode.HEAT,
+    "heatClean": HVACMode.HEAT,
+    "fanOnly": HVACMode.FAN_ONLY,
+    "wind": HVACMode.FAN_ONLY,
 }
 
 HVAC_TO_AC_MODE = {
-    HVAC_MODE_HEAT_COOL: "auto",
-    HVAC_MODE_COOL: "cool",
-    HVAC_MODE_DRY: "dry",
-    HVAC_MODE_HEAT: "heat",
-    HVAC_MODE_FAN_ONLY: "wind",
+    HVACMode.HEAT_COOL: "auto",
+    HVACMode.COOL: "cool",
+    HVACMode.DRY: "dry",
+    HVACMode.HEAT: "heat",
+    HVACMode.FAN_ONLY: "wind",
 }
 
 # Only show warnings
@@ -90,11 +77,11 @@ HVAC_TO_AC_MODE = {
 #logging.getLogger("urllib3").propagate = False
 
 _LOGGER = logging.getLogger(__name__)
-_CERT = '/mnt/dietpi_userdata/homeassistant/components_configs/ac14k_m.pem'
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
-    
+    """Set up the Samsung climate platform."""
     if CONF_DEVICES not in config:
+        _LOGGER.error("No devices configured")
         return
 
     devices = config[CONF_DEVICES]
@@ -105,52 +92,72 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         host = device_conf[CONF_HOST]
         port = device_conf[CONF_PORT]
         token = device_conf[CONF_TOKEN]
+        cert_path = device_conf[CONF_CERT_PATH]
 
-        entities.append(RoomAirConditioner(name, host, port, token))
+        entities.append(RoomAirConditioner(name, host, port, token, cert_path))
 
     async_add_entities(entities, True)
     
-class RoomAirConditioner(ClimateDevice):
+class RoomAirConditioner(ClimateEntity):
     """Representation of a room air conditioner device."""
 
-    def __init__(self, name, host, port, token):
+    def __init__(self, name, host, port, token, cert_path):
         """Initialize the device."""
         self._name = name
         self._host = host
         self._port = port
         self._token = token
+        self._cert_path = cert_path
         
-        self._url = 'https://{}:{}/devices'.format(host, port)
-        self._headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer {}'.format(token) }
+        self._url = f'https://{host}:{port}/devices'
+        self._headers = { 
+            'Content-Type': 'application/json', 
+            'Authorization': f'Bearer {token}' 
+        }
         
-        self._temperature_unit = TEMP_CELSIUS
-        self._current_temperature = None
-        self._target_temperature = None
-        self._hvac_mode = HVAC_MODE_OFF;
-        self._supported_hvac_modes = [  HVAC_MODE_HEAT_COOL,
-                                        HVAC_MODE_COOL,
-                                        HVAC_MODE_DRY,
-                                        HVAC_MODE_HEAT,
-                                        HVAC_MODE_FAN_ONLY,
-                                        HVAC_MODE_OFF ];
-        
-
+        self._attr_temperature_unit = UnitOfTemperature.CELSIUS
+        self._attr_current_temperature = None
+        self._attr_target_temperature = None
+        self._attr_hvac_mode = HVACMode.OFF
+        self._attr_hvac_modes = [
+            HVACMode.HEAT_COOL,
+            HVACMode.COOL,
+            HVACMode.DRY,
+            HVACMode.HEAT,
+            HVACMode.FAN_ONLY,
+            HVACMode.OFF
+        ]
+        self._attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
     async def api_put_data(self, path, data):
-        async with aiohttp.ClientSession() as session:
-            sslcontext = ssl._create_unverified_context()
-            sslcontext.load_cert_chain(_CERT)
-            await session.put(self._url + path, headers=self._headers, ssl=sslcontext, data=data)
+        """Send PUT request to the device API."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                sslcontext = ssl._create_unverified_context()
+                sslcontext.load_cert_chain(self._cert_path)
+                async with session.put(
+                    self._url + path, 
+                    headers=self._headers, 
+                    ssl=sslcontext, 
+                    data=data
+                ) as response:
+                    if response.status != 200:
+                        _LOGGER.error(
+                            "Failed to send command to %s: %s", 
+                            self._name, 
+                            response.status
+                        )
+        except Exception as ex:
+            _LOGGER.error("Error communicating with %s: %s", self._name, ex)
 
     @property
     def supported_features(self):
         """Return the list of supported features."""
-        # OLD VALUES -> SUPPORT_TARGET_TEMPERATURE | ATTR_HVAC_MODE | HVAC_MODE_OFF
-        return SUPPORT_TARGET_TEMPERATURE # | SUPPORT_FAN_MODE;
+        return self._attr_supported_features
 
     @property
     def temperature_unit(self):
         """Return the unit of measurement."""
-        return self._temperature_unit
+        return self._attr_temperature_unit
 
     @property
     def name(self):
@@ -160,12 +167,12 @@ class RoomAirConditioner(ClimateDevice):
     @property
     def current_temperature(self):
         """Return the current temperature."""
-        return self._current_temperature
+        return self._attr_current_temperature
 
     @property
     def target_temperature(self):
         """Return the temperature we try to reach."""
-        return self._target_temperature
+        return self._attr_target_temperature
 
     @property
     def target_temperature_step(self):
@@ -175,12 +182,12 @@ class RoomAirConditioner(ClimateDevice):
     @property
     def hvac_mode(self):
         """Return current operation ie. heat, cool, idle."""
-        return self._hvac_mode
+        return self._attr_hvac_mode
 
     @property
     def hvac_modes(self):
         """Return the list of available operation modes."""
-        return self._supported_hvac_modes
+        return self._attr_hvac_modes
 
     # @property
     # def fan_mode(self):
@@ -202,42 +209,69 @@ class RoomAirConditioner(ClimateDevice):
     async def async_set_temperature(self, **kwargs):
         """Set new target temperatures."""
         if kwargs.get(ATTR_TEMPERATURE) is not None:
-            self._target_temperature = kwargs.get(ATTR_TEMPERATURE)
-            await self.api_put_data('/0/temperatures/0', "{{\"desired\": {} }}".format(self._target_temperature))
+            self._attr_target_temperature = kwargs.get(ATTR_TEMPERATURE)
+            await self.api_put_data(
+                '/0/temperatures/0', 
+                f'{{"desired": {self._attr_target_temperature} }}'
+            )
         
-        self.async_schedule_update_ha_state(True)
+        self.async_write_ha_state()
 
     async def async_set_hvac_mode(self, hvac_mode):
         """Set new operation mode."""
-        if self._hvac_mode == hvac_mode:
+        if self._attr_hvac_mode == hvac_mode:
             return
         
-        self._hvac_mode = hvac_mode
+        self._attr_hvac_mode = hvac_mode
         
-        if hvac_mode == HVAC_MODE_OFF:
-            await self.api_put_data('/0', "{\"Operation\" : {\"power\" : \"Off\"} }")
+        if hvac_mode == HVACMode.OFF:
+            await self.api_put_data('/0', '{"Operation" : {"power" : "Off"} }')
         else:
             ac_mode = HVAC_TO_AC_MODE[hvac_mode]
-            await self.api_put_data('/0', "{{\"Operation\" : {{\"power\" : \"On\"}}, \"Mode\" : {{\"modes\": [\"{}\"] }}}}".format(ac_mode.capitalize()))
+            await self.api_put_data(
+                '/0', 
+                f'{{"Operation" : {{"power" : "On"}}, "Mode" : {{"modes": ["{ac_mode.capitalize()}"] }}}}'
+            )
         
-        self.async_schedule_update_ha_state(True)
+        self.async_write_ha_state()
     
     async def async_update(self):
-        async with aiohttp.ClientSession() as session:
-            sslcontext = ssl._create_unverified_context()
-            sslcontext.load_cert_chain(_CERT)
-            async with session.get(self._url, headers=self._headers, ssl=sslcontext) as r:            
-                if r.status == 200:
-                    result = await r.json()
-                    if len(result['Devices']) > 0:
-                        device = result['Devices'][0]
-                        if device["Operation"]["power"] == 'On':
-                            self._hvac_mode = AC_MODE_TO_HVAC.get(device["Mode"]["modes"][0].lower())
-                        else:
-                            self._hvac_mode = HVAC_MODE_OFF
+        """Fetch new state data for this climate device."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                sslcontext = ssl._create_unverified_context()
+                sslcontext.load_cert_chain(self._cert_path)
+                async with session.get(
+                    self._url, 
+                    headers=self._headers, 
+                    ssl=sslcontext
+                ) as response:            
+                    if response.status == 200:
+                        result = await response.json()
+                        if len(result.get('Devices', [])) > 0:
+                            device = result['Devices'][0]
+                            if device["Operation"]["power"] == 'On':
+                                self._attr_hvac_mode = AC_MODE_TO_HVAC.get(
+                                    device["Mode"]["modes"][0].lower(), 
+                                    HVACMode.OFF
+                                )
+                            else:
+                                self._attr_hvac_mode = HVACMode.OFF
 
-                        if len(device["Temperatures"]) > 0:
-                            temp = device["Temperatures"][0]
-                            self._current_temperature = temp["current"]
-                            self._target_temperature = temp["desired"]
-                            self._temperature_unit = TEMP_CELSIUS if temp["unit"] == 'Celsius' else TEMP_FAHRENHEIT
+                            if len(device.get("Temperatures", [])) > 0:
+                                temp = device["Temperatures"][0]
+                                self._attr_current_temperature = temp["current"]
+                                self._attr_target_temperature = temp["desired"]
+                                self._attr_temperature_unit = (
+                                    UnitOfTemperature.CELSIUS 
+                                    if temp["unit"] == 'Celsius' 
+                                    else UnitOfTemperature.FAHRENHEIT
+                                )
+                    else:
+                        _LOGGER.error(
+                            "Failed to update %s: HTTP %s", 
+                            self._name, 
+                            response.status
+                        )
+        except Exception as ex:
+            _LOGGER.error("Error updating %s: %s", self._name, ex)

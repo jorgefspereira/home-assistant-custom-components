@@ -32,16 +32,13 @@ NOTE: Assign static IP address to your AC (check your router settings to do that
 ```yaml
 
 climate:
-  - platform: samsung
+  - platform: samsung_climate
     devices:
-      - name: Office
-        host: *****
-        port: 8888
-        token: *****
-      - name: Living Room
-        host: *****
-        port: 8888
-        token: *****
+      - name: "Living Room AC"
+        host: "192.168.1.100"
+        port: "8888"
+        token: "your_token_here"
+        cert_path: "/path/to/your/certificate.pem" 
 
 ```
 
@@ -58,7 +55,7 @@ To obtain a token for your samsung air conditioner do the following:
 
 - Turn OFF your AC
 - Find the ip address of your ac.
-- Run `python Server8889.py`
+- Run `python2 Server8889.py`
 - Open another shell and run `curl -k -H "Content-Type: application/json" -H "DeviceToken: xxxxxxxxxxx" --cert /path_to_pem/ac14k_m.pem --insecure -X POST https://IP_ADDRESS:8888/devicetoken/request` with the right values for `path_to_pem` and `IP_ADDRESS`
 - Turn ON your AC
 - Check the shell running the file Server8889.py...it should appear the TOKEN.
