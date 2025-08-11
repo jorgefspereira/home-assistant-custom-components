@@ -91,7 +91,8 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     except FileNotFoundError as ex:
         raise CertificateNotFound from ex
     except aiohttp.ClientError as ex:
-        print(f"Failed to connect BB: {ex}")
+        print(f"Failed to connect BB to {data['host']}:{data['port']}")
+        print(f"Failed to connect BB to {ex}")
         raise CannotConnect from ex
     except Exception as ex:
         print(f"Failed to connect CC to {data['host']}:{data['port']}")
