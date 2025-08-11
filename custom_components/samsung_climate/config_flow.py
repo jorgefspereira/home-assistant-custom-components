@@ -105,23 +105,22 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
             timeout=aiohttp.ClientTimeout(total=10),
             trace_configs=[trace_config]
         ) as session:
-            try:
-                # Debug: Print all headers being sent
-                print(f"Request URL: {url}")
-                print(f"Request headers: {headers}")
+            # Debug: Print all headers being sent
+            print(f"Request URL: {url}")
+            print(f"Request headers: {headers}")
+            
+            # Create a custom request to see all headers
+            async with session.get(url, headers=headers, ssl=sslcontext) as response:
+                print(f"Response status: {response.status}")
+                print(f"Response headers: {dict(response.headers)}")
                 
-                # Create a custom request to see all headers
-                async with session.get(url, headers=headers, ssl=sslcontext) as response:
-                    print(f"Response status: {response.status}")
-                    print(f"Response headers: {dict(response.headers)}")
-                    
-                    if response.status != 200:
-                        print(f"Failed to connect AA to {data['host']}:{data['port']}")
-                        raise CannotConnect
-                    
-                    result = await response.json()
-                    if not result.get('Devices'):
-                        raise NoDevices
+                if response.status != 200:
+                    print(f"Failed to connect AA to {data['host']}:{data['port']}")
+                    raise CannotConnect
+                
+                result = await response.json()
+                if not result.get('Devices'):
+                    raise NoDevices
 
     except FileNotFoundError as ex:
         raise CertificateNotFound from ex
