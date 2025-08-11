@@ -108,7 +108,8 @@ class RoomAirConditioner(ClimateEntity):
     async def api_put_data(self, path, data):
         """Send PUT request to the device API."""
         try:
-            async with aiohttp.ClientSession() as session:
+            # Create SSL context in executor to avoid blocking
+            def create_ssl_context():
                 sslcontext = ssl._create_unverified_context()
                 # Allow weak certificates and signatures for older devices
                 sslcontext.set_ciphers('DEFAULT:@SECLEVEL=0')
@@ -120,7 +121,12 @@ class RoomAirConditioner(ClimateEntity):
                     _LOGGER.warning("SSL certificate load failed for %s: %s", self._name, ssl_ex)
                     # Continue without client certificate if loading fails
                     pass
-                
+                return sslcontext
+            
+            # Run SSL context creation in executor
+            sslcontext = await self.hass.async_add_executor_job(create_ssl_context)
+            
+            async with aiohttp.ClientSession() as session:
                 async with session.put(
                     self._url + path, 
                     headers=self._headers, 
@@ -225,10 +231,11 @@ class RoomAirConditioner(ClimateEntity):
     async def async_update(self):
         """Fetch new state data for this climate device."""
         try:
-            async with aiohttp.ClientSession() as session:
+            # Create SSL context in executor to avoid blocking
+            def create_ssl_context():
                 sslcontext = ssl._create_unverified_context()
                 # Allow weak certificates and signatures for older devices
-                sslcontext.set_ciphers('DEFAULT:@SECLEVEL=1')
+                sslcontext.set_ciphers('DEFAULT:@SECLEVEL=0')
                 sslcontext.check_hostname = False
                 sslcontext.verify_mode = ssl.CERT_NONE
                 try:
@@ -237,7 +244,12 @@ class RoomAirConditioner(ClimateEntity):
                     _LOGGER.warning("SSL certificate load failed for %s: %s", self._name, ssl_ex)
                     # Continue without client certificate if loading fails
                     pass
-                
+                return sslcontext
+            
+            # Run SSL context creation in executor
+            sslcontext = await self.hass.async_add_executor_job(create_ssl_context)
+            
+            async with aiohttp.ClientSession() as session:
                 async with session.get(
                     self._url, 
                     headers=self._headers, 

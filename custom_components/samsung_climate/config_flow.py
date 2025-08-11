@@ -22,7 +22,7 @@ _LOGGER = logging.getLogger(__name__)
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required("host"): str,
-        vol.Required("port", default="8888"): str,
+        vol.Required("port", default="8887"): str,
         vol.Required("token"): str,
         vol.Optional("name", default="Samsung AC"): str,
         vol.Optional("cert_path", default="ac14k_m.pem"): str,
@@ -60,7 +60,8 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
             'Authorization': f'Bearer {data["token"]}'
         }
         
-        async with aiohttp.ClientSession() as session:
+        # Create SSL context in executor to avoid blocking
+        def create_ssl_context():
             sslcontext = ssl._create_unverified_context()
             # Allow weak certificates and signatures for older devices
             sslcontext.set_ciphers('DEFAULT:@SECLEVEL=0')
@@ -69,11 +70,15 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
             try:
                 sslcontext.load_cert_chain(cert_path)
             except ssl.SSLError as ssl_ex:
-                print(f"SSL certificate load failed: {ssl_ex}")
                 _LOGGER.warning("SSL certificate load failed: %s", ssl_ex)
                 # Continue without client certificate if loading fails
                 pass
-            
+            return sslcontext
+        
+        # Run SSL context creation in executor
+        sslcontext = await hass.async_add_executor_job(create_ssl_context)
+        
+        async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers, ssl=sslcontext) as response:
                 if response.status != 200:
                     raise CannotConnect
