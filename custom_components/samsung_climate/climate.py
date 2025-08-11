@@ -110,7 +110,17 @@ class RoomAirConditioner(ClimateEntity):
         try:
             async with aiohttp.ClientSession() as session:
                 sslcontext = ssl._create_unverified_context()
-                sslcontext.load_cert_chain(self._cert_path)
+                # Allow weak certificates and signatures for older devices
+                sslcontext.set_ciphers('DEFAULT:@SECLEVEL=0')
+                sslcontext.check_hostname = False
+                sslcontext.verify_mode = ssl.CERT_NONE
+                try:
+                    sslcontext.load_cert_chain(self._cert_path)
+                except ssl.SSLError as ssl_ex:
+                    _LOGGER.warning("SSL certificate load failed for %s: %s", self._name, ssl_ex)
+                    # Continue without client certificate if loading fails
+                    pass
+                
                 async with session.put(
                     self._url + path, 
                     headers=self._headers, 
@@ -217,7 +227,17 @@ class RoomAirConditioner(ClimateEntity):
         try:
             async with aiohttp.ClientSession() as session:
                 sslcontext = ssl._create_unverified_context()
-                sslcontext.load_cert_chain(self._cert_path)
+                # Allow weak certificates and signatures for older devices
+                sslcontext.set_ciphers('DEFAULT:@SECLEVEL=1')
+                sslcontext.check_hostname = False
+                sslcontext.verify_mode = ssl.CERT_NONE
+                try:
+                    sslcontext.load_cert_chain(self._cert_path)
+                except ssl.SSLError as ssl_ex:
+                    _LOGGER.warning("SSL certificate load failed for %s: %s", self._name, ssl_ex)
+                    # Continue without client certificate if loading fails
+                    pass
+                
                 async with session.get(
                     self._url, 
                     headers=self._headers, 

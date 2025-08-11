@@ -62,7 +62,16 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         
         async with aiohttp.ClientSession() as session:
             sslcontext = ssl._create_unverified_context()
-            sslcontext.load_cert_chain(cert_path)
+            # Allow weak certificates and signatures for older devices
+            sslcontext.set_ciphers('DEFAULT:@SECLEVEL=0')
+            sslcontext.check_hostname = False
+            sslcontext.verify_mode = ssl.CERT_NONE
+            try:
+                sslcontext.load_cert_chain(cert_path)
+            except ssl.SSLError as ssl_ex:
+                _LOGGER.warning("SSL certificate load failed: %s", ssl_ex)
+                # Continue without client certificate if loading fails
+                pass
             
             async with session.get(url, headers=headers, ssl=sslcontext) as response:
                 if response.status != 200:
