@@ -88,9 +88,7 @@ class RoomAirConditioner(ClimateEntity):
         
         self._url = f'https://{host}:{port}/devices'
         self._headers = { 
-            'Content-Type': 'application/json', 
-            'Authorization': f'Bearer {token}',
-            'X-API-Version': 'v1.0.0'
+            'Authorization': f'Bearer {token}'
         }
         
         self._attr_temperature_unit = UnitOfTemperature.CELSIUS

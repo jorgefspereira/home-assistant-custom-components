@@ -19,10 +19,20 @@ from .const import DOMAIN, CONF_CERT_PATH
 
 _LOGGER = logging.getLogger(__name__)
 
+# Debug function to trace requests
+async def on_request_start(session, trace_config_ctx, params):
+    print(f"Starting request {params.method} {params.url}")
+    print(f"Headers: {dict(params.headers)}")
+
+async def on_request_end(session, trace_config_ctx, params):
+    print(f"Ending request {params.method} {params.url}")
+    print(f"Response status: {params.response.status}")
+    print(f"Response headers: {dict(params.response.headers)}")
+
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required("host"): str,
-        vol.Required("port", default="8887"): str,
+        vol.Required("port", default="8888"): str,
         vol.Required("token"): str,
         vol.Optional("name", default="Samsung AC"): str,
         vol.Optional("cert_path", default="ac14k_m.pem"): str,
@@ -56,9 +66,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     try:
         url = f'https://{data["host"]}:{data["port"]}/devices'
         headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {data["token"]}',
-            'X-API-Version': 'v1.0.0'
+            'Authorization': f'Bearer {data["token"]}'
         }
         
         # Create SSL context in executor to avoid blocking
@@ -87,22 +95,28 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         # Run SSL context creation in executor
         sslcontext = await hass.async_add_executor_job(create_ssl_context)
         
-        async with aiohttp.ClientSession() as session:
+        # Create trace config for debugging
+        trace_config = aiohttp.TraceConfig()
+        trace_config.on_request_start.append(on_request_start)
+        trace_config.on_request_end.append(on_request_end)
+        
+        # Create session with minimal headers to avoid conflicts
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=10),
+            trace_configs=[trace_config]
+        ) as session:
             try:
+                # Debug: Print all headers being sent
+                print(f"Request URL: {url}")
+                print(f"Request headers: {headers}")
+                
+                # Create a custom request to see all headers
                 async with session.get(url, headers=headers, ssl=sslcontext) as response:
+                    print(f"Response status: {response.status}")
+                    print(f"Response headers: {dict(response.headers)}")
+                    
                     if response.status != 200:
                         print(f"Failed to connect AA to {data['host']}:{data['port']}")
-                        raise CannotConnect
-                    
-                    result = await response.json()
-                    if not result.get('Devices'):
-                        raise NoDevices
-            except (aiohttp.ClientSSLError, ssl.SSLError) as ssl_error:
-                _LOGGER.warning("SSL connection failed, trying without SSL: %s", ssl_error)
-                # Try without SSL as fallback
-                url_no_ssl = f'http://{data["host"]}:{data["port"]}/devices'
-                async with session.get(url_no_ssl, headers=headers) as response:
-                    if response.status != 200:
                         raise CannotConnect
                     
                     result = await response.json()
@@ -112,6 +126,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     except FileNotFoundError as ex:
         raise CertificateNotFound from ex
     except aiohttp.ClientError as ex:
+
         print(f"Failed to connect BB to {ex}")
         raise CannotConnect from ex
     except Exception as ex:
