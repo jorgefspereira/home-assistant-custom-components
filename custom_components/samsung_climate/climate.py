@@ -1,55 +1,27 @@
 """Samsung climate platform for Home Assistant."""
 
-import ipaddress
-import asyncio
 import aiohttp
 import ssl
 import logging
-import voluptuous as vol
-import homeassistant.helpers.config_validation as cv
 
 from homeassistant.components.climate import ClimateEntity
-
 from homeassistant.components.climate.const import (
-    ATTR_HVAC_MODE,
-    ATTR_TARGET_TEMP_HIGH,
-    ATTR_TARGET_TEMP_LOW,
     HVACAction,
     HVACMode,
     ClimateEntityFeature
 )
-
 from homeassistant.const import (
     UnitOfTemperature, 
-    ATTR_TEMPERATURE, 
-    CONF_HOST, 
-    CONF_DEVICES, 
-    CONF_NAME, 
-    CONF_PORT, 
-    CONF_TOKEN
+    ATTR_TEMPERATURE
 )
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from homeassistant.helpers.config_validation import (
-    PLATFORM_SCHEMA, 
-    PLATFORM_SCHEMA_BASE
-)
+from .const import DOMAIN, CONF_CERT_PATH, DEFAULT_CERT_PATH
 
-# Configuration constants
-CONF_CERT_PATH = "cert_path"
 
-DEVICE_CONFIG_SCHEMA = vol.Schema({
-    vol.Required(CONF_HOST): vol.All(ipaddress.ip_address, cv.string),
-    vol.Optional(CONF_NAME, default='RAC'): cv.string,
-    vol.Required(CONF_PORT): cv.string,
-    vol.Required(CONF_TOKEN): cv.string,
-    vol.Optional(CONF_CERT_PATH): cv.string,
-})
-
-PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
-    vol.Optional(CONF_HOST): cv.string,
-    vol.Optional(CONF_DEVICES): vol.All(cv.ensure_list, [DEVICE_CONFIG_SCHEMA]),
-})
-
+_LOGGER = logging.getLogger(__name__)
 
 AC_MODE_TO_HVAC = {
     "auto": HVACMode.HEAT_COOL,
@@ -71,43 +43,42 @@ HVAC_TO_AC_MODE = {
     HVACMode.FAN_ONLY: "wind",
 }
 
-# Only show warnings
-#logging.getLogger("urllib3").setLevel(logging.WARNING)
-# Disable all child loggers of urllib3, e.g. urllib3.connectionpool
-#logging.getLogger("urllib3").propagate = False
 
-_LOGGER = logging.getLogger(__name__)
-
-async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
-    """Set up the Samsung climate platform."""
-    if CONF_DEVICES not in config:
-        _LOGGER.error("No devices configured")
-        return
-
-    devices = config[CONF_DEVICES]
-    entities = []
-
-    for device_conf in devices:
-        name = device_conf[CONF_NAME]
-        host = device_conf[CONF_HOST]
-        port = device_conf[CONF_PORT]
-        token = device_conf[CONF_TOKEN]
-        cert_path = device_conf[CONF_CERT_PATH]
-
-        entities.append(RoomAirConditioner(name, host, port, token, cert_path))
-
-    async_add_entities(entities, True)
+async def async_setup_entry(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up the Samsung climate platform from config entry."""
+    data = config_entry.data
     
+    name = data.get("name", "Samsung AC")
+    host = data["host"]
+    port = data["port"]
+    token = data["token"]
+    cert_path = data.get("cert_path", DEFAULT_CERT_PATH)
+
+    entity = RoomAirConditioner(
+        name=name,
+        host=host,
+        port=port,
+        token=token,
+        cert_path=cert_path,
+        unique_id=config_entry.entry_id
+    )
+
+    async_add_entities([entity], True)
 class RoomAirConditioner(ClimateEntity):
     """Representation of a room air conditioner device."""
 
-    def __init__(self, name, host, port, token, cert_path):
+    def __init__(self, name, host, port, token, cert_path, unique_id):
         """Initialize the device."""
         self._name = name
         self._host = host
         self._port = port
         self._token = token
         self._cert_path = cert_path
+        self._attr_unique_id = unique_id
         
         self._url = f'https://{host}:{port}/devices'
         self._headers = { 

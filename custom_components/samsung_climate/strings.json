@@ -1,0 +1,26 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Samsung Climate",
+        "description": "Configure your Samsung Air Conditioner",
+        "data": {
+          "host": "IP Address",
+          "port": "Port",
+          "token": "Token",
+          "name": "Name",
+          "cert_path": "Certificate Path (optional)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the device",
+      "invalid_host": "Invalid IP address",
+      "no_devices": "No devices found on the specified host",
+      "unknown": "Unexpected error occurred"
+    },
+    "abort": {
+      "already_configured": "Device is already configured"
+    }
+  }
+}
