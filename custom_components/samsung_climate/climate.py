@@ -115,6 +115,14 @@ class RoomAirConditioner(ClimateEntity):
                 sslcontext.set_ciphers('DEFAULT:@SECLEVEL=0')
                 sslcontext.check_hostname = False
                 sslcontext.verify_mode = ssl.CERT_NONE
+                
+                # Enable older TLS versions for compatibility with old devices
+                sslcontext.minimum_version = ssl.TLSVersion.TLSv1
+                sslcontext.maximum_version = ssl.TLSVersion.TLSv1_3
+                
+                # Set additional options for compatibility
+                sslcontext.options |= ssl.OP_LEGACY_SERVER_CONNECT
+                
                 try:
                     sslcontext.load_cert_chain(self._cert_path)
                 except ssl.SSLError as ssl_ex:
@@ -238,6 +246,14 @@ class RoomAirConditioner(ClimateEntity):
                 sslcontext.set_ciphers('DEFAULT:@SECLEVEL=0')
                 sslcontext.check_hostname = False
                 sslcontext.verify_mode = ssl.CERT_NONE
+                
+                # Enable older TLS versions for compatibility with old devices
+                sslcontext.minimum_version = ssl.TLSVersion.TLSv1
+                sslcontext.maximum_version = ssl.TLSVersion.TLSv1_3
+                
+                # Set additional options for compatibility
+                sslcontext.options |= ssl.OP_LEGACY_SERVER_CONNECT
+                
                 try:
                     sslcontext.load_cert_chain(self._cert_path)
                 except ssl.SSLError as ssl_ex:

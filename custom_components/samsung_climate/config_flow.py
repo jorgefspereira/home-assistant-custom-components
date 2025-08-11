@@ -67,6 +67,14 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
             sslcontext.set_ciphers('DEFAULT:@SECLEVEL=0')
             sslcontext.check_hostname = False
             sslcontext.verify_mode = ssl.CERT_NONE
+            
+            # Enable older TLS versions for compatibility with old devices
+            sslcontext.minimum_version = ssl.TLSVersion.TLSv1
+            sslcontext.maximum_version = ssl.TLSVersion.TLSv1_3
+            
+            # Set additional options for compatibility
+            sslcontext.options |= ssl.OP_LEGACY_SERVER_CONNECT
+            
             try:
                 sslcontext.load_cert_chain(cert_path)
             except ssl.SSLError as ssl_ex:
@@ -79,19 +87,30 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         sslcontext = await hass.async_add_executor_job(create_ssl_context)
         
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, ssl=sslcontext) as response:
-                if response.status != 200:
-                    print(f"Failed to connect AA to {data['host']}:{data['port']}")
-                    raise CannotConnect
-                
-                result = await response.json()
-                if not result.get('Devices'):
-                    raise NoDevices
+            try:
+                async with session.get(url, headers=headers, ssl=sslcontext) as response:
+                    if response.status != 200:
+                        print(f"Failed to connect AA to {data['host']}:{data['port']}")
+                        raise CannotConnect
+                    
+                    result = await response.json()
+                    if not result.get('Devices'):
+                        raise NoDevices
+            except (aiohttp.ClientSSLError, ssl.SSLError) as ssl_error:
+                _LOGGER.warning("SSL connection failed, trying without SSL: %s", ssl_error)
+                # Try without SSL as fallback
+                url_no_ssl = f'http://{data["host"]}:{data["port"]}/devices'
+                async with session.get(url_no_ssl, headers=headers) as response:
+                    if response.status != 200:
+                        raise CannotConnect
+                    
+                    result = await response.json()
+                    if not result.get('Devices'):
+                        raise NoDevices
 
     except FileNotFoundError as ex:
         raise CertificateNotFound from ex
     except aiohttp.ClientError as ex:
-        print(f"Failed to connect BB to {data['host']}:{data['port']}")
         print(f"Failed to connect BB to {ex}")
         raise CannotConnect from ex
     except Exception as ex:
