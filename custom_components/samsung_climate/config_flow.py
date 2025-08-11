@@ -57,7 +57,8 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         url = f'https://{data["host"]}:{data["port"]}/devices'
         headers = {
             'Content-Type': 'application/json',
-            'Authorization': f'Bearer {data["token"]}'
+            'Authorization': f'Bearer {data["token"]}',
+            'X-API-Version': 'v1.0.0'
         }
         
         # Create SSL context in executor to avoid blocking
