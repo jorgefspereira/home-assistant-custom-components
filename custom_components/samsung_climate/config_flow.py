@@ -6,6 +6,7 @@ import voluptuous as vol
 import ipaddress
 import aiohttp
 import ssl
+import os
 from typing import Any
 
 from homeassistant import config_entries
@@ -24,7 +25,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Required("port", default="8889"): str,
         vol.Required("token"): str,
         vol.Optional("name", default="Samsung AC"): str,
-        vol.Optional("cert_path"): str,
+        vol.Optional("cert_path", default="ac14k_m.pem"): str,
     }
 )
 
@@ -40,6 +41,17 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     except ValueError as ex:
         raise InvalidHost from ex
 
+    # Get the certificate path - if relative, make it relative to this component
+    cert_path = data.get("cert_path", "ac14k_m.pem")
+    if not os.path.isabs(cert_path):
+        # Get the directory where this integration is located
+        component_dir = os.path.dirname(os.path.abspath(__file__))
+        cert_path = os.path.join(component_dir, cert_path)
+    
+    # Check if certificate file exists
+    if not os.path.exists(cert_path):
+        raise CertificateNotFound
+
     # Test connection to the device
     try:
         url = f'https://{data["host"]}:{data["port"]}/devices'
@@ -50,8 +62,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         
         async with aiohttp.ClientSession() as session:
             sslcontext = ssl._create_unverified_context()
-            if data.get("cert_path"):
-                sslcontext.load_cert_chain(data["cert_path"])
+            sslcontext.load_cert_chain(cert_path)
             
             async with session.get(url, headers=headers, ssl=sslcontext) as response:
                 if response.status != 200:
@@ -61,12 +72,17 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
                 if not result.get('Devices'):
                     raise NoDevices
 
+    except FileNotFoundError as ex:
+        raise CertificateNotFound from ex
     except aiohttp.ClientError as ex:
         raise CannotConnect from ex
     except Exception as ex:
         _LOGGER.exception("Unexpected exception")
         raise CannotConnect from ex
 
+    # Store the full path for later use
+    data["cert_path"] = cert_path
+    
     # Return info that you want to store in the config entry.
     return {"title": data["name"]}
 
@@ -90,6 +106,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["host"] = "invalid_host"
             except NoDevices:
                 errors["base"] = "no_devices"
+            except CertificateNotFound:
+                errors["cert_path"] = "certificate_not_found"
             except Exception:  # pylint: disable=broad-except
                 _LOGGER.exception("Unexpected exception")
                 errors["base"] = "unknown"
@@ -116,3 +134,7 @@ class InvalidHost(HomeAssistantError):
 
 class NoDevices(HomeAssistantError):
     """Error to indicate no devices found."""
+
+
+class CertificateNotFound(HomeAssistantError):
+    """Error to indicate certificate file not found."""

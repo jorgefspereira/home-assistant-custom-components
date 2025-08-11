@@ -6,4 +6,4 @@ PLATFORMS = [Platform.CLIMATE]
 
 # Configuration constants
 CONF_CERT_PATH = "cert_path"
-DEFAULT_CERT_PATH = "/mnt/dietpi_userdata/homeassistant/components_configs/ac14k_m.pem"
+DEFAULT_CERT_PATH = "ac14k_m.pem"  # Default certificate filename within the component

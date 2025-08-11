@@ -9,7 +9,7 @@
           "port": "Port",
           "token": "Token",
           "name": "Name",
-          "cert_path": "Certificate Path (optional)"
+          "cert_path": "Certificate Path (relative to component or absolute)"
         }
       }
     },
@@ -17,6 +17,7 @@
       "cannot_connect": "Failed to connect to the device",
       "invalid_host": "Invalid IP address",
       "no_devices": "No devices found on the specified host",
+      "certificate_not_found": "Certificate file not found",
       "unknown": "Unexpected error occurred"
     },
     "abort": {

@@ -3,6 +3,7 @@
 import aiohttp
 import ssl
 import logging
+import os
 
 from homeassistant.components.climate import ClimateEntity
 from homeassistant.components.climate.const import (
@@ -56,7 +57,12 @@ async def async_setup_entry(
     host = data["host"]
     port = data["port"]
     token = data["token"]
-    cert_path = data.get("cert_path", DEFAULT_CERT_PATH)
+    cert_path = data.get("cert_path", "ac14k_m.pem")
+    
+    # If cert_path is relative, make it relative to this component directory
+    if not os.path.isabs(cert_path):
+        component_dir = os.path.dirname(os.path.abspath(__file__))
+        cert_path = os.path.join(component_dir, cert_path)
 
     entity = RoomAirConditioner(
         name=name,
