@@ -66,7 +66,10 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     try:
         url = f'https://{data["host"]}:{data["port"]}/devices'
         headers = {
-            'Authorization': f'Bearer {data["token"]}'
+            'Authorization': f'Bearer {data["token"]}',
+            'User-Agent': 'HomeAssistant',
+            'Accept': '*/*',
+            'Connection': 'close'
         }
         
         # Create SSL context in executor to avoid blocking
@@ -110,7 +113,12 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
             print(f"Request headers: {headers}")
             
             # Create a custom request to see all headers
-            async with session.get(url, headers=headers, ssl=sslcontext) as response:
+            async with session.get(
+                url, 
+                headers=headers, 
+                ssl=sslcontext,
+                skip_auto_headers={'User-Agent', 'Accept', 'Accept-Encoding'}
+            ) as response:
                 print(f"Response status: {response.status}")
                 print(f"Response headers: {dict(response.headers)}")
                 
