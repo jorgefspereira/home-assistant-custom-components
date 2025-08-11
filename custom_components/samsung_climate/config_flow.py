@@ -22,7 +22,7 @@ _LOGGER = logging.getLogger(__name__)
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required("host"): str,
-        vol.Required("port", default="8889"): str,
+        vol.Required("port", default="8888"): str,
         vol.Required("token"): str,
         vol.Optional("name", default="Samsung AC"): str,
         vol.Optional("cert_path", default="ac14k_m.pem"): str,
@@ -69,6 +69,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
             try:
                 sslcontext.load_cert_chain(cert_path)
             except ssl.SSLError as ssl_ex:
+                print(f"SSL certificate load failed: {ssl_ex}")
                 _LOGGER.warning("SSL certificate load failed: %s", ssl_ex)
                 # Continue without client certificate if loading fails
                 pass
