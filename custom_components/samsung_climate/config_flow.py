@@ -81,6 +81,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers, ssl=sslcontext) as response:
                 if response.status != 200:
+                    print(f"Failed to connect A to {data['host']}:{data['port']}")
                     raise CannotConnect
                 
                 result = await response.json()
@@ -90,8 +91,10 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     except FileNotFoundError as ex:
         raise CertificateNotFound from ex
     except aiohttp.ClientError as ex:
+        print(f"Failed to connect B to {data['host']}:{data['port']}")
         raise CannotConnect from ex
     except Exception as ex:
+        print(f"Failed to connect C to {data['host']}:{data['port']}")
         _LOGGER.exception("Unexpected exception")
         raise CannotConnect from ex
 
