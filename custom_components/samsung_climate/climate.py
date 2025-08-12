@@ -171,8 +171,8 @@ class RoomAirConditioner(ClimateEntity):
             # Parse the response manually
             response_text = response_data.decode('utf-8', errors='ignore')
             
-            # Check if the request was successful
-            if "HTTP/1.1 200" in response_text:
+            # Check if the request was successful (200 OK or 204 No Content)
+            if "HTTP/1.1 200" in response_text or "HTTP/1.1 204" in response_text:
                 if method == "PUT":
                     _LOGGER.debug("Successfully sent command to %s", self._name)
                     return True
