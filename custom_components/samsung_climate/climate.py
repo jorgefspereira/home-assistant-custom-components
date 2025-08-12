@@ -259,14 +259,18 @@ class RoomAirConditioner(ClimateEntity):
         """Set new target temperatures."""
         if kwargs.get(ATTR_TEMPERATURE) is not None:
             target_temp = kwargs.get(ATTR_TEMPERATURE)
-            _LOGGER.warning("Updated temperature to A %s", target_temp)
+            _LOGGER.warning("Updated temperature to A1 %s", target_temp)
 
             success = await self.api_put_data(
                 '/0/temperatures/0', 
                 f'{{"desired": {target_temp} }}'
             )
 
-            if not success:
+            if success:
+                _LOGGER.warning("Updated temperature to A2 %s", target_temp)
+                self._attr_target_temperature = target_temp
+                self.async_write_ha_state()
+            else:
                 _LOGGER.error("Failed to set temperature for %s", self._name)
         
     async def async_set_hvac_mode(self, hvac_mode):
@@ -278,19 +282,24 @@ class RoomAirConditioner(ClimateEntity):
         success = False
         
         if hvac_mode == HVACMode.OFF:
-            await self.api_put_data('/0', '{"Operation" : {"power" : "Off"} }')
+            success = await self.api_put_data('/0', '{"Operation" : {"power" : "Off"} }')
         else:
             ac_mode = HVAC_TO_AC_MODE[hvac_mode]
-            await self.api_put_data(
+            success = await self.api_put_data(
                 '/0', 
                 f'{{"Operation" : {{"power" : "On"}}, "Mode" : {{"modes": ["{ac_mode.capitalize()}"] }}}}'
             )
-        if not success:
+        
+        if success:
+            self._attr_hvac_mode = hvac_mode
+            self.async_write_ha_state()
+        else:
             _LOGGER.error("Failed to set HVAC mode for %s", self._name)
-            
+    
     async def async_update(self):
         """Fetch new state data for this climate device."""
         try:
+            _LOGGER.warning("Fetching new state data for %s", self._name)
             result = await self._http_request()
             
             if result and len(result.get('Devices', [])) > 0:
@@ -305,6 +314,7 @@ class RoomAirConditioner(ClimateEntity):
 
                 if len(device.get("Temperatures", [])) > 0:
                     temp = device["Temperatures"][0]
+                    _LOGGER.warning("Updated temperature to B1 %s", temp["desired"])
                     self._attr_current_temperature = temp["current"]
                     self._attr_target_temperature = temp["desired"]
                     self._attr_temperature_unit = (
