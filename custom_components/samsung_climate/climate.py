@@ -113,7 +113,8 @@ class RoomAirConditioner(ClimateEntity):
         try:
             # Create the same SSL context as before
             def create_ssl_context():
-                sslcontext = ssl._create_unverified_context()
+                # Use SSLContext constructor directly to avoid set_default_verify_paths
+                sslcontext = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
                 # Allow weak certificates and signatures for older devices
                 sslcontext.set_ciphers('DEFAULT:@SECLEVEL=0')
                 sslcontext.check_hostname = False
@@ -197,7 +198,8 @@ class RoomAirConditioner(ClimateEntity):
         try:
             # Create SSL context in executor to avoid blocking
             def create_ssl_context():
-                sslcontext = ssl._create_unverified_context()
+                # Use SSLContext constructor directly to avoid set_default_verify_paths
+                sslcontext = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
                 # Allow weak certificates and signatures for older devices
                 sslcontext.set_ciphers('DEFAULT:@SECLEVEL=0')
                 sslcontext.check_hostname = False
@@ -337,7 +339,8 @@ class RoomAirConditioner(ClimateEntity):
         try:
             # Create SSL context in executor to avoid blocking
             def create_ssl_context():
-                sslcontext = ssl._create_unverified_context()
+                # Use SSLContext constructor directly to avoid set_default_verify_paths
+                sslcontext = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
                 # Allow weak certificates and signatures for older devices
                 sslcontext.set_ciphers('DEFAULT:@SECLEVEL=0')
                 sslcontext.check_hostname = False
