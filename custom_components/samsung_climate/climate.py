@@ -104,6 +104,67 @@ class RoomAirConditioner(ClimateEntity):
             HVACMode.OFF
         ]
         self._attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
+
+    async def _raw_http_request(self):
+        """Fallback method using raw HTTP to handle malformed headers."""
+        import json
+        import asyncio
+        
+        try:
+            # Use asyncio to create a raw connection
+            reader, writer = await asyncio.open_connection(
+                self._host, int(self._port), ssl=True
+            )
+            
+            # Construct manual HTTP request
+            request = f"GET /devices HTTP/1.1\r\n"
+            request += f"Host: {self._host}:{self._port}\r\n"
+            request += f"Authorization: Bearer {self._token}\r\n"
+            request += "Connection: close\r\n"
+            request += "\r\n"
+            
+            writer.write(request.encode())
+            await writer.drain()
+            
+            # Read the response
+            response_data = await reader.read()
+            writer.close()
+            await writer.wait_closed()
+            
+            # Parse the response manually
+            response_text = response_data.decode('utf-8', errors='ignore')
+            
+            # Find the JSON part (after the headers)
+            json_start = response_text.find('\r\n\r\n')
+            if json_start != -1:
+                json_data = response_text[json_start + 4:]
+                result = json.loads(json_data)
+                
+                # Process the data same as before
+                if len(result.get('Devices', [])) > 0:
+                    device = result['Devices'][0]
+                    if device["Operation"]["power"] == 'On':
+                        self._attr_hvac_mode = AC_MODE_TO_HVAC.get(
+                            device["Mode"]["modes"][0].lower(), 
+                            HVACMode.OFF
+                        )
+                    else:
+                        self._attr_hvac_mode = HVACMode.OFF
+
+                    if len(device.get("Temperatures", [])) > 0:
+                        temp = device["Temperatures"][0]
+                        self._attr_current_temperature = temp["current"]
+                        self._attr_target_temperature = temp["desired"]
+                        self._attr_temperature_unit = (
+                            UnitOfTemperature.CELSIUS 
+                            if temp["unit"] == 'Celsius' 
+                            else UnitOfTemperature.FAHRENHEIT
+                        )
+                    
+                    _LOGGER.info("Successfully updated %s using raw HTTP", self._name)
+                    
+        except Exception as ex:
+            _LOGGER.error("Raw HTTP request failed for %s: %s", self._name, ex)
         
     async def api_put_data(self, path, data):
         """Send PUT request to the device API."""
@@ -274,8 +335,9 @@ class RoomAirConditioner(ClimateEntity):
             # Run SSL context creation in executor
             sslcontext = await self.hass.async_add_executor_job(create_ssl_context)
             
-            async with aiohttp.ClientSession() as session:
-                try:
+            # Try to get data with aiohttp, fallback to manual parsing if headers fail
+            try:
+                async with aiohttp.ClientSession() as session:
                     async with session.get(
                         self._url, 
                         headers=self._headers, 
@@ -308,13 +370,13 @@ class RoomAirConditioner(ClimateEntity):
                                 self._name, 
                                 response.status
                             )
-                except aiohttp.ClientResponseError as resp_error:
-                    if "Invalid header token" in str(resp_error):
-                        _LOGGER.warning("Server sent malformed headers for %s, but device is responding", self._name)
-                        # Server responded but with malformed headers - device is working
-                        # We can't parse the response but at least we know it's alive
-                    else:
-                        _LOGGER.error("Response error for %s: %s", self._name, resp_error)
-                        raise
+            except aiohttp.ClientResponseError as resp_error:
+                if "Invalid header token" in str(resp_error):
+                    _LOGGER.warning("Malformed headers from %s, attempting raw HTTP request", self._name)
+                    # Try with a more basic approach using raw socket connection
+                    await self._raw_http_request()
+                else:
+                    _LOGGER.error("Response error for %s: %s", self._name, resp_error)
+                    raise
         except Exception as ex:
             _LOGGER.error("Error updating %s: %s", self._name, ex)
