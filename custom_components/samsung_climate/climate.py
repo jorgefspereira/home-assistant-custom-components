@@ -193,9 +193,10 @@ class RoomAirConditioner(ClimateEntity):
         except Exception as ex:
             _LOGGER.error("HTTP request failed for %s: %s", self._name, ex)
             return None
+
     async def api_put_data(self, path, data):
         """Send PUT request to the device API."""
-        await self._http_request("PUT", path, data)
+        return await self._http_request("PUT", path, data)
 
     @property
     def supported_features(self):
@@ -257,31 +258,44 @@ class RoomAirConditioner(ClimateEntity):
     async def async_set_temperature(self, **kwargs):
         """Set new target temperatures."""
         if kwargs.get(ATTR_TEMPERATURE) is not None:
-            self._attr_target_temperature = kwargs.get(ATTR_TEMPERATURE)
-            await self.api_put_data(
+            target_temp = kwargs.get(ATTR_TEMPERATURE)
+            
+            # Update state immediately for responsive UI
+            self._attr_target_temperature = target_temp
+            self.async_write_ha_state()
+            
+            # Send command to device in background
+            success = await self.api_put_data(
                 '/0/temperatures/0', 
-                f'{{"desired": {self._attr_target_temperature} }}'
+                f'{{"desired": {target_temp} }}'
             )
-        
-        self.async_write_ha_state()
+            
+            if not success:
+                _LOGGER.error("Failed to set temperature for %s", self._name)
 
     async def async_set_hvac_mode(self, hvac_mode):
         """Set new operation mode."""
         if self._attr_hvac_mode == hvac_mode:
             return
         
+        # Update state immediately for responsive UI
         self._attr_hvac_mode = hvac_mode
+        self.async_write_ha_state()
+        
+        # Send command to device in background
+        success = False
         
         if hvac_mode == HVACMode.OFF:
-            await self.api_put_data('/0', '{"Operation" : {"power" : "Off"} }')
+            success = await self.api_put_data('/0', '{"Operation" : {"power" : "Off"} }')
         else:
             ac_mode = HVAC_TO_AC_MODE[hvac_mode]
-            await self.api_put_data(
+            success = await self.api_put_data(
                 '/0', 
                 f'{{"Operation" : {{"power" : "On"}}, "Mode" : {{"modes": ["{ac_mode.capitalize()}"] }}}}'
             )
         
-        self.async_write_ha_state()
+        if not success:
+            _LOGGER.error("Failed to set HVAC mode for %s", self._name)
     
     async def async_update(self):
         """Fetch new state data for this climate device."""
