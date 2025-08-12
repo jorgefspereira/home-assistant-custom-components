@@ -260,18 +260,15 @@ class RoomAirConditioner(ClimateEntity):
         if kwargs.get(ATTR_TEMPERATURE) is not None:
             target_temp = kwargs.get(ATTR_TEMPERATURE)
             
-            # Update state immediately for responsive UI
-            self._attr_target_temperature = target_temp
-            self.async_write_ha_state()
-            
             # Send command to device in background
-            success = await self.api_put_data(
+            self.api_put_data(
                 '/0/temperatures/0', 
                 f'{{"desired": {target_temp} }}'
             )
-            
-            if not success:
-                _LOGGER.error("Failed to set temperature for %s", self._name)
+
+            # Update state immediately for responsive UI
+            self._attr_target_temperature = target_temp
+            self.async_write_ha_state()
 
     async def async_set_hvac_mode(self, hvac_mode):
         """Set new operation mode."""
@@ -284,7 +281,7 @@ class RoomAirConditioner(ClimateEntity):
         
         # Send command to device in background
         success = False
-        
+
         if hvac_mode == HVACMode.OFF:
             success = await self.api_put_data('/0', '{"Operation" : {"power" : "Off"} }')
         else:
