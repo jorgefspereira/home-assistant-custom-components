@@ -107,7 +107,7 @@ class RoomAirConditioner(ClimateEntity):
         ]
         self._attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
 
-    async def _http_request(self, method="GET", path=""):
+    async def _http_request(self, method="GET", path="", data=None):
         """Make HTTP request using raw sockets to handle malformed headers."""
         
         try:
@@ -147,8 +147,18 @@ class RoomAirConditioner(ClimateEntity):
             request = f"{method} /devices{path} HTTP/1.1\r\n"
             request += f"Host: {self._host}:{self._port}\r\n"
             request += f"Authorization: Bearer {self._token}\r\n"
+            
+            # Add content headers for PUT requests
+            if method == "PUT" and data:
+                request += f"Content-Length: {len(data)}\r\n"
+                request += "Content-Type: application/json\r\n"
+            
             request += "Connection: close\r\n"
             request += "\r\n"
+            
+            # Add data for PUT requests
+            if method == "PUT" and data:
+                request += data
             
             writer.write(request.encode())
             await writer.drain()
@@ -161,88 +171,31 @@ class RoomAirConditioner(ClimateEntity):
             # Parse the response manually
             response_text = response_data.decode('utf-8', errors='ignore')
             
-            # Find the JSON part (after the headers)
-            json_start = response_text.find('\r\n\r\n')
-            if json_start != -1:
-                json_data = response_text[json_start + 4:]
-                if json_data.strip():  # Only parse if there's actual JSON data
-                    return json.loads(json_data)
+            # Check if the request was successful
+            if "HTTP/1.1 200" in response_text:
+                if method == "PUT":
+                    _LOGGER.debug("Successfully sent command to %s", self._name)
+                    return True
+                else:
+                    # For GET requests, return the JSON data
+                    json_start = response_text.find('\r\n\r\n')
+                    if json_start != -1:
+                        json_data = response_text[json_start + 4:]
+                        if json_data.strip():  # Only parse if there's actual JSON data
+                            return json.loads(json_data)
+            else:
+                if method == "PUT":
+                    _LOGGER.error("Failed to send command to %s: %s", self._name, response_text)
+                return None
             
             return None
                     
         except Exception as ex:
             _LOGGER.error("HTTP request failed for %s: %s", self._name, ex)
             return None
-        
-    async def _http_put_request(self, path, data):
-        """Make PUT request using raw sockets to handle malformed headers."""
-        
-        try:
-            # Create SSL context in executor to avoid blocking
-            def create_ssl_context():
-                # Use SSLContext constructor directly to avoid set_default_verify_paths
-                sslcontext = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-                # Allow weak certificates and signatures for older devices
-                sslcontext.set_ciphers('DEFAULT:@SECLEVEL=0')
-                sslcontext.check_hostname = False
-                sslcontext.verify_mode = ssl.CERT_NONE
-                
-                # Enable older TLS versions for compatibility with old devices
-                sslcontext.minimum_version = ssl.TLSVersion.TLSv1
-                sslcontext.maximum_version = ssl.TLSVersion.TLSv1_3
-                
-                # Set additional options for compatibility
-                sslcontext.options |= ssl.OP_LEGACY_SERVER_CONNECT
-                
-                try:
-                    sslcontext.load_cert_chain(self._cert_path)
-                except ssl.SSLError as ssl_ex:
-                    _LOGGER.warning("SSL certificate load failed for %s: %s", self._name, ssl_ex)
-                    # Continue without client certificate if loading fails
-                    pass
-                return sslcontext
-            
-            # Create SSL context in executor to avoid blocking
-            sslcontext = await self.hass.async_add_executor_job(create_ssl_context)
-            
-            # Use asyncio to create a raw connection with proper SSL context
-            reader, writer = await asyncio.open_connection(
-                self._host, int(self._port), ssl=sslcontext
-            )
-            
-            # Construct manual HTTP PUT request
-            request = f"PUT /devices{path} HTTP/1.1\r\n"
-            request += f"Host: {self._host}:{self._port}\r\n"
-            request += f"Authorization: Bearer {self._token}\r\n"
-            request += f"Content-Length: {len(data)}\r\n"
-            request += "Content-Type: application/json\r\n"
-            request += "Connection: close\r\n"
-            request += "\r\n"
-            request += data
-            
-            writer.write(request.encode())
-            await writer.drain()
-            
-            # Read the response
-            response_data = await reader.read()
-            writer.close()
-            await writer.wait_closed()
-            
-            # Parse the response manually to check status
-            response_text = response_data.decode('utf-8', errors='ignore')
-            
-            # Check if the request was successful
-            if "HTTP/1.1 200" in response_text:
-                _LOGGER.debug("Successfully sent command to %s", self._name)
-            else:
-                _LOGGER.error("Failed to send command to %s", self._name)
-                    
-        except Exception as ex:
-            _LOGGER.error("Error communicating with %s: %s", self._name, ex)
-
     async def api_put_data(self, path, data):
         """Send PUT request to the device API."""
-        await self._http_put_request(path, data)
+        await self._http_request("PUT", path, data)
 
     @property
     def supported_features(self):
