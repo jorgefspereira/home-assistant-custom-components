@@ -19,16 +19,6 @@ from .const import DOMAIN, CONF_CERT_PATH
 
 _LOGGER = logging.getLogger(__name__)
 
-# Debug function to trace requests
-async def on_request_start(session, trace_config_ctx, params):
-    print(f"Starting request {params.method} {params.url}")
-    print(f"Headers: {dict(params.headers)}")
-
-async def on_request_end(session, trace_config_ctx, params):
-    print(f"Ending request {params.method} {params.url}")
-    print(f"Response status: {params.response.status}")
-    print(f"Response headers: {dict(params.response.headers)}")
-
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required("host"): str,
@@ -113,13 +103,8 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         async with aiohttp.ClientSession(
             connector=connector,
             timeout=aiohttp.ClientTimeout(total=10),
-            trace_configs=[trace_config],
             read_bufsize=1024  # Smaller buffer might help with malformed headers
         ) as session:
-            # Debug: Print all headers being sent
-            print(f"Request URL: {url}")
-            print(f"Request headers: {headers}")
-            
             # Create a custom request to see all headers
             try:
                 async with session.get(
@@ -128,11 +113,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
                     ssl=sslcontext,
                     skip_auto_headers={'User-Agent', 'Accept', 'Accept-Encoding'}
                 ) as response:
-                    print(f"Response status: {response.status}")
-                    print(f"Response headers: {dict(response.headers)}")
-                    
                     if response.status != 200:
-                        print(f"Failed to connect AA to {data['host']}:{data['port']}")
                         raise CannotConnect
                     
                     result = await response.json()
@@ -140,10 +121,10 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
                         raise NoDevices
             except aiohttp.ClientResponseError as resp_error:
                 if "Invalid header token" in str(resp_error):
-                    print(f"Server sent malformed headers, treating as successful connection")
+                    _LOGGER.warning(f"Server sent malformed headers, treating as successful connection")
                     # The server has malformed headers but responded, so connection works
                     # We'll assume the device is available since it responded
-                    print(f"Assuming device is available despite header parsing error")
+                    _LOGGER.warning(f"Assuming device is available despite header parsing error")
                     # Don't raise an exception - treat this as success
                 else:
                     raise
@@ -151,10 +132,8 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     except FileNotFoundError as ex:
         raise CertificateNotFound from ex
     except aiohttp.ClientError as ex:
-        print(f"Failed to connect BB to {ex}")
         raise CannotConnect from ex
     except Exception as ex:
-        print(f"Failed to connect CC to {data['host']}:{data['port']}")
         _LOGGER.exception("Unexpected exception")
         raise CannotConnect from ex
 
