@@ -260,9 +260,10 @@ class RoomAirConditioner(ClimateEntity):
         if kwargs.get(ATTR_TEMPERATURE) is not None:
             target_temp = kwargs.get(ATTR_TEMPERATURE)
             
+            # _LOGGER.warning("Updated temperature to %s", target_temp)
             # Update state immediately for responsive UI
             self._attr_target_temperature = target_temp
-            self.async_write_ha_state()
+            # self.async_write_ha_state()
             
             # Send command to device in background
             # success = await self.api_put_data(
