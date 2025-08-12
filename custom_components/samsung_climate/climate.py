@@ -267,19 +267,15 @@ class RoomAirConditioner(ClimateEntity):
             )
 
             if success:
-                _LOGGER.error("Failed to set temperature for %s", self._name)
-            else:
                 self._attr_target_temperature = target_temp
                 self.async_write_ha_state()
+            else:
+                _LOGGER.error("Failed to set temperature for %s", self._name)
         
     async def async_set_hvac_mode(self, hvac_mode):
         """Set new operation mode."""
         if self._attr_hvac_mode == hvac_mode:
             return
-        
-        # Update state immediately for responsive UI
-        self._attr_hvac_mode = hvac_mode
-        self.async_write_ha_state()
         
         # Send command to device in background
         success = False
@@ -293,7 +289,10 @@ class RoomAirConditioner(ClimateEntity):
                 f'{{"Operation" : {{"power" : "On"}}, "Mode" : {{"modes": ["{ac_mode.capitalize()}"] }}}}'
             )
         
-        if not success:
+        if success:
+            self._attr_hvac_mode = hvac_mode
+            self.async_write_ha_state()
+        else:
             _LOGGER.error("Failed to set HVAC mode for %s", self._name)
     
     async def async_update(self):
