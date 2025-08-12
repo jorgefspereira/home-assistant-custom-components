@@ -1,9 +1,10 @@
 """Samsung climate platform for Home Assistant."""
 
-import aiohttp
 import ssl
 import logging
 import os
+import json
+import asyncio
 
 from homeassistant.components.climate import ClimateEntity
 from homeassistant.components.climate.const import (
@@ -74,6 +75,7 @@ async def async_setup_entry(
     )
 
     async_add_entities([entity], True)
+
 class RoomAirConditioner(ClimateEntity):
     """Representation of a room air conditioner device."""
 
@@ -105,13 +107,11 @@ class RoomAirConditioner(ClimateEntity):
         ]
         self._attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
 
-    async def _raw_http_request(self):
-        """Fallback method using raw HTTP to handle malformed headers."""
-        import json
-        import asyncio
+    async def _http_request(self, method="GET", path=""):
+        """Make HTTP request using raw sockets to handle malformed headers."""
         
         try:
-            # Create the same SSL context as before
+            # Create SSL context in executor to avoid blocking
             def create_ssl_context():
                 # Use SSLContext constructor directly to avoid set_default_verify_paths
                 sslcontext = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -144,7 +144,7 @@ class RoomAirConditioner(ClimateEntity):
             )
             
             # Construct manual HTTP request
-            request = f"GET /devices HTTP/1.1\r\n"
+            request = f"{method} /devices{path} HTTP/1.1\r\n"
             request += f"Host: {self._host}:{self._port}\r\n"
             request += f"Authorization: Bearer {self._token}\r\n"
             request += "Connection: close\r\n"
@@ -165,36 +165,18 @@ class RoomAirConditioner(ClimateEntity):
             json_start = response_text.find('\r\n\r\n')
             if json_start != -1:
                 json_data = response_text[json_start + 4:]
-                result = json.loads(json_data)
-                
-                # Process the data same as before
-                if len(result.get('Devices', [])) > 0:
-                    device = result['Devices'][0]
-                    if device["Operation"]["power"] == 'On':
-                        self._attr_hvac_mode = AC_MODE_TO_HVAC.get(
-                            device["Mode"]["modes"][0].lower(), 
-                            HVACMode.OFF
-                        )
-                    else:
-                        self._attr_hvac_mode = HVACMode.OFF
-
-                    if len(device.get("Temperatures", [])) > 0:
-                        temp = device["Temperatures"][0]
-                        self._attr_current_temperature = temp["current"]
-                        self._attr_target_temperature = temp["desired"]
-                        self._attr_temperature_unit = (
-                            UnitOfTemperature.CELSIUS 
-                            if temp["unit"] == 'Celsius' 
-                            else UnitOfTemperature.FAHRENHEIT
-                        )
-                    
-                    _LOGGER.info("Successfully updated %s using raw HTTP", self._name)
+                if json_data.strip():  # Only parse if there's actual JSON data
+                    return json.loads(json_data)
+            
+            return None
                     
         except Exception as ex:
-            _LOGGER.error("Raw HTTP request failed for %s: %s", self._name, ex)
+            _LOGGER.error("HTTP request failed for %s: %s", self._name, ex)
+            return None
         
-    async def api_put_data(self, path, data):
-        """Send PUT request to the device API."""
+    async def _http_put_request(self, path, data):
+        """Make PUT request using raw sockets to handle malformed headers."""
+        
         try:
             # Create SSL context in executor to avoid blocking
             def create_ssl_context():
@@ -220,33 +202,47 @@ class RoomAirConditioner(ClimateEntity):
                     pass
                 return sslcontext
             
-            # Run SSL context creation in executor
+            # Create SSL context in executor to avoid blocking
             sslcontext = await self.hass.async_add_executor_job(create_ssl_context)
             
-            async with aiohttp.ClientSession() as session:
-                try:
-                    async with session.put(
-                        self._url + path, 
-                        headers=self._headers, 
-                        ssl=sslcontext, 
-                        data=data
-                    ) as response:
-                        if response.status != 200:
-                            _LOGGER.error(
-                                "Failed to send command to %s: %s", 
-                                self._name, 
-                                response.status
-                            )
-                except aiohttp.ClientResponseError as resp_error:
-                    if "Invalid header token" in str(resp_error):
-                        _LOGGER.warning("Server sent malformed headers for %s during command, but command may have succeeded", self._name)
-                        # Server responded but with malformed headers - command might have worked
-                        # We can't verify the response but the device is responding
-                    else:
-                        _LOGGER.error("Response error for %s: %s", self._name, resp_error)
-                        raise
+            # Use asyncio to create a raw connection with proper SSL context
+            reader, writer = await asyncio.open_connection(
+                self._host, int(self._port), ssl=sslcontext
+            )
+            
+            # Construct manual HTTP PUT request
+            request = f"PUT /devices{path} HTTP/1.1\r\n"
+            request += f"Host: {self._host}:{self._port}\r\n"
+            request += f"Authorization: Bearer {self._token}\r\n"
+            request += f"Content-Length: {len(data)}\r\n"
+            request += "Content-Type: application/json\r\n"
+            request += "Connection: close\r\n"
+            request += "\r\n"
+            request += data
+            
+            writer.write(request.encode())
+            await writer.drain()
+            
+            # Read the response
+            response_data = await reader.read()
+            writer.close()
+            await writer.wait_closed()
+            
+            # Parse the response manually to check status
+            response_text = response_data.decode('utf-8', errors='ignore')
+            
+            # Check if the request was successful
+            if "HTTP/1.1 200" in response_text:
+                _LOGGER.debug("Successfully sent command to %s", self._name)
+            else:
+                _LOGGER.error("Failed to send command to %s", self._name)
+                    
         except Exception as ex:
             _LOGGER.error("Error communicating with %s: %s", self._name, ex)
+
+    async def api_put_data(self, path, data):
+        """Send PUT request to the device API."""
+        await self._http_put_request(path, data)
 
     @property
     def supported_features(self):
@@ -337,75 +333,31 @@ class RoomAirConditioner(ClimateEntity):
     async def async_update(self):
         """Fetch new state data for this climate device."""
         try:
-            # Create SSL context in executor to avoid blocking
-            def create_ssl_context():
-                # Use SSLContext constructor directly to avoid set_default_verify_paths
-                sslcontext = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-                # Allow weak certificates and signatures for older devices
-                sslcontext.set_ciphers('DEFAULT:@SECLEVEL=0')
-                sslcontext.check_hostname = False
-                sslcontext.verify_mode = ssl.CERT_NONE
-                
-                # Enable older TLS versions for compatibility with old devices
-                sslcontext.minimum_version = ssl.TLSVersion.TLSv1
-                sslcontext.maximum_version = ssl.TLSVersion.TLSv1_3
-                
-                # Set additional options for compatibility
-                sslcontext.options |= ssl.OP_LEGACY_SERVER_CONNECT
-                
-                try:
-                    sslcontext.load_cert_chain(self._cert_path)
-                except ssl.SSLError as ssl_ex:
-                    _LOGGER.warning("SSL certificate load failed for %s: %s", self._name, ssl_ex)
-                    # Continue without client certificate if loading fails
-                    pass
-                return sslcontext
+            result = await self._http_request()
             
-            # Run SSL context creation in executor
-            sslcontext = await self.hass.async_add_executor_job(create_ssl_context)
-            
-            # Try to get data with aiohttp, fallback to manual parsing if headers fail
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(
-                        self._url, 
-                        headers=self._headers, 
-                        ssl=sslcontext
-                    ) as response:            
-                        if response.status == 200:
-                            result = await response.json()
-                            if len(result.get('Devices', [])) > 0:
-                                device = result['Devices'][0]
-                                if device["Operation"]["power"] == 'On':
-                                    self._attr_hvac_mode = AC_MODE_TO_HVAC.get(
-                                        device["Mode"]["modes"][0].lower(), 
-                                        HVACMode.OFF
-                                    )
-                                else:
-                                    self._attr_hvac_mode = HVACMode.OFF
-
-                                if len(device.get("Temperatures", [])) > 0:
-                                    temp = device["Temperatures"][0]
-                                    self._attr_current_temperature = temp["current"]
-                                    self._attr_target_temperature = temp["desired"]
-                                    self._attr_temperature_unit = (
-                                        UnitOfTemperature.CELSIUS 
-                                        if temp["unit"] == 'Celsius' 
-                                        else UnitOfTemperature.FAHRENHEIT
-                                    )
-                        else:
-                            _LOGGER.error(
-                                "Failed to update %s: HTTP %s", 
-                                self._name, 
-                                response.status
-                            )
-            except aiohttp.ClientResponseError as resp_error:
-                if "Invalid header token" in str(resp_error):
-                    _LOGGER.warning("Malformed headers from %s, attempting raw HTTP request", self._name)
-                    # Try with a more basic approach using raw socket connection
-                    await self._raw_http_request()
+            if result and len(result.get('Devices', [])) > 0:
+                device = result['Devices'][0]
+                if device["Operation"]["power"] == 'On':
+                    self._attr_hvac_mode = AC_MODE_TO_HVAC.get(
+                        device["Mode"]["modes"][0].lower(), 
+                        HVACMode.OFF
+                    )
                 else:
-                    _LOGGER.error("Response error for %s: %s", self._name, resp_error)
-                    raise
+                    self._attr_hvac_mode = HVACMode.OFF
+
+                if len(device.get("Temperatures", [])) > 0:
+                    temp = device["Temperatures"][0]
+                    self._attr_current_temperature = temp["current"]
+                    self._attr_target_temperature = temp["desired"]
+                    self._attr_temperature_unit = (
+                        UnitOfTemperature.CELSIUS 
+                        if temp["unit"] == 'Celsius' 
+                        else UnitOfTemperature.FAHRENHEIT
+                    )
+                
+                _LOGGER.debug("Successfully updated %s", self._name)
+            else:
+                _LOGGER.warning("No device data received for %s", self._name)
+                
         except Exception as ex:
             _LOGGER.error("Error updating %s: %s", self._name, ex)

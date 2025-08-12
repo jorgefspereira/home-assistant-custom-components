@@ -4,9 +4,10 @@ from __future__ import annotations
 import logging
 import voluptuous as vol
 import ipaddress
-import aiohttp
 import ssl
 import os
+import asyncio
+import json
 from typing import Any
 
 from homeassistant import config_entries
@@ -54,17 +55,10 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
 
     # Test connection to the device
     try:
-        url = f'https://{data["host"]}:{data["port"]}/devices'
-        headers = {
-            'Authorization': f'Bearer {data["token"]}',
-            'User-Agent': 'HomeAssistant',
-            'Accept': '*/*',
-            'Connection': 'close'
-        }
-        
         # Create SSL context in executor to avoid blocking
         def create_ssl_context():
-            sslcontext = ssl._create_unverified_context()
+            # Use SSLContext constructor directly to avoid set_default_verify_paths
+            sslcontext = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
             # Allow weak certificates and signatures for older devices
             sslcontext.set_ciphers('DEFAULT:@SECLEVEL=0')
             sslcontext.check_hostname = False
@@ -88,50 +82,45 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         # Run SSL context creation in executor
         sslcontext = await hass.async_add_executor_job(create_ssl_context)
         
-        # Create trace config for debugging
-        trace_config = aiohttp.TraceConfig()
-        trace_config.on_request_start.append(on_request_start)
-        trace_config.on_request_end.append(on_request_end)
-        
-        # Create session with minimal headers to avoid conflicts  
-        connector = aiohttp.TCPConnector(
-            ssl=sslcontext,
-            limit=1,
-            force_close=True  # Force close connections to avoid header caching issues
+        # Use raw HTTP to avoid malformed header issues
+        reader, writer = await asyncio.open_connection(
+            data["host"], int(data["port"]), ssl=sslcontext
         )
         
-        async with aiohttp.ClientSession(
-            connector=connector,
-            timeout=aiohttp.ClientTimeout(total=10),
-            read_bufsize=1024  # Smaller buffer might help with malformed headers
-        ) as session:
-            # Create a custom request to see all headers
-            try:
-                async with session.get(
-                    url, 
-                    headers=headers, 
-                    ssl=sslcontext,
-                    skip_auto_headers={'User-Agent', 'Accept', 'Accept-Encoding'}
-                ) as response:
-                    if response.status != 200:
-                        raise CannotConnect
-                    
-                    result = await response.json()
-                    if not result.get('Devices'):
-                        raise NoDevices
-            except aiohttp.ClientResponseError as resp_error:
-                if "Invalid header token" in str(resp_error):
-                    _LOGGER.warning(f"Server sent malformed headers, treating as successful connection")
-                    # The server has malformed headers but responded, so connection works
-                    # We'll assume the device is available since it responded
-                    _LOGGER.warning(f"Assuming device is available despite header parsing error")
-                    # Don't raise an exception - treat this as success
-                else:
-                    raise
+        # Construct manual HTTP request
+        request = f"GET /devices HTTP/1.1\r\n"
+        request += f"Host: {data['host']}:{data['port']}\r\n"
+        request += f"Authorization: Bearer {data['token']}\r\n"
+        request += "Connection: close\r\n"
+        request += "\r\n"
+        
+        writer.write(request.encode())
+        await writer.drain()
+        
+        # Read the response
+        response_data = await reader.read()
+        writer.close()
+        await writer.wait_closed()
+        
+        # Parse the response manually
+        response_text = response_data.decode('utf-8', errors='ignore')
+        
+        # Check if we got a 200 response
+        if "HTTP/1.1 200" not in response_text:
+            raise CannotConnect
+        
+        # Find the JSON part (after the headers)
+        json_start = response_text.find('\r\n\r\n')
+        if json_start != -1:
+            json_data = response_text[json_start + 4:]
+            if json_data.strip():
+                result = json.loads(json_data)
+                if not result.get('Devices'):
+                    raise NoDevices
 
     except FileNotFoundError as ex:
         raise CertificateNotFound from ex
-    except aiohttp.ClientError as ex:
+    except (ConnectionError, OSError, asyncio.TimeoutError) as ex:
         raise CannotConnect from ex
     except Exception as ex:
         _LOGGER.exception("Unexpected exception")
