@@ -103,32 +103,49 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         trace_config.on_request_start.append(on_request_start)
         trace_config.on_request_end.append(on_request_end)
         
-        # Create session with minimal headers to avoid conflicts
+        # Create session with minimal headers to avoid conflicts  
+        connector = aiohttp.TCPConnector(
+            ssl=sslcontext,
+            limit=1,
+            force_close=True  # Force close connections to avoid header caching issues
+        )
+        
         async with aiohttp.ClientSession(
+            connector=connector,
             timeout=aiohttp.ClientTimeout(total=10),
-            trace_configs=[trace_config]
+            trace_configs=[trace_config],
+            read_bufsize=1024  # Smaller buffer might help with malformed headers
         ) as session:
             # Debug: Print all headers being sent
             print(f"Request URL: {url}")
             print(f"Request headers: {headers}")
             
             # Create a custom request to see all headers
-            async with session.get(
-                url, 
-                headers=headers, 
-                ssl=sslcontext,
-                skip_auto_headers={'User-Agent', 'Accept', 'Accept-Encoding'}
-            ) as response:
-                print(f"Response status: {response.status}")
-                print(f"Response headers: {dict(response.headers)}")
-                
-                if response.status != 200:
-                    print(f"Failed to connect AA to {data['host']}:{data['port']}")
+            try:
+                async with session.get(
+                    url, 
+                    headers=headers, 
+                    ssl=sslcontext,
+                    skip_auto_headers={'User-Agent', 'Accept', 'Accept-Encoding'}
+                ) as response:
+                    print(f"Response status: {response.status}")
+                    print(f"Response headers: {dict(response.headers)}")
+                    
+                    if response.status != 200:
+                        print(f"Failed to connect AA to {data['host']}:{data['port']}")
+                        raise CannotConnect
+                    
+                    result = await response.json()
+                    if not result.get('Devices'):
+                        raise NoDevices
+            except aiohttp.ClientResponseError as resp_error:
+                if "Invalid header token" in str(resp_error):
+                    print(f"Server sent malformed headers, but continuing...")
+                    # The server has malformed headers but might still work
+                    # Let's try a different approach - raw HTTP request
                     raise CannotConnect
-                
-                result = await response.json()
-                if not result.get('Devices'):
-                    raise NoDevices
+                else:
+                    raise
 
     except FileNotFoundError as ex:
         raise CertificateNotFound from ex
