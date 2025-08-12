@@ -148,6 +148,14 @@ class RoomAirConditioner(ClimateEntity):
             request += f"Host: {self._host}:{self._port}\r\n"
             request += f"Authorization: Bearer {self._token}\r\n"
             
+            # Add cache-busting headers for GET requests
+            if method == "GET":
+                import time
+                request += f"Cache-Control: no-cache, no-store, must-revalidate\r\n"
+                request += f"Pragma: no-cache\r\n"
+                request += f"Expires: 0\r\n"
+                request += f"X-Timestamp: {int(time.time())}\r\n"
+            
             # Add content headers for PUT requests
             if method == "PUT" and data:
                 request += f"Content-Length: {len(data)}\r\n"
