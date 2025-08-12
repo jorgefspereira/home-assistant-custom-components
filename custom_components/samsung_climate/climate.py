@@ -259,21 +259,19 @@ class RoomAirConditioner(ClimateEntity):
         """Set new target temperatures."""
         if kwargs.get(ATTR_TEMPERATURE) is not None:
             target_temp = kwargs.get(ATTR_TEMPERATURE)
-            
-            _LOGGER.warning("Updated temperature to %s", target_temp)
-            # Update state immediately for responsive UI
-            self._attr_target_temperature = target_temp
-            # self.async_write_ha_state()
-            
-            # Send command to device in background
-            # success = await self.api_put_data(
-            #     '/0/temperatures/0', 
-            #     f'{{"desired": {target_temp} }}'
-            # )
-            
-            # if not success:
-            #     _LOGGER.error("Failed to set temperature for %s", self._name)
+            _LOGGER.warning("Updated temperature to A %s", target_temp)
 
+            success = await self.api_put_data(
+                '/0/temperatures/0', 
+                f'{{"desired": {target_temp} }}'
+            )
+
+            if success:
+                _LOGGER.error("Failed to set temperature for %s", self._name)
+            else:
+                self._attr_target_temperature = target_temp
+                self.async_write_ha_state()
+        
     async def async_set_hvac_mode(self, hvac_mode):
         """Set new operation mode."""
         if self._attr_hvac_mode == hvac_mode:
@@ -315,7 +313,7 @@ class RoomAirConditioner(ClimateEntity):
 
                 if len(device.get("Temperatures", [])) > 0:
                     temp = device["Temperatures"][0]
-                    _LOGGER.warning("Updated temperature to %s", temp["desired"])
+                    _LOGGER.warning("Updated temperature to B %s", temp["desired"])
                     self._attr_current_temperature = temp["current"]
                     self._attr_target_temperature = temp["desired"]
                     self._attr_temperature_unit = (
@@ -323,7 +321,7 @@ class RoomAirConditioner(ClimateEntity):
                         if temp["unit"] == 'Celsius' 
                         else UnitOfTemperature.FAHRENHEIT
                     )
-                                
+
                 _LOGGER.debug("Successfully updated %s", self._name)
             else:
                 _LOGGER.warning("No device data received for %s", self._name)
