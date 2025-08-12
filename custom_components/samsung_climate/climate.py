@@ -111,9 +111,35 @@ class RoomAirConditioner(ClimateEntity):
         import asyncio
         
         try:
-            # Use asyncio to create a raw connection
+            # Create the same SSL context as before
+            def create_ssl_context():
+                sslcontext = ssl._create_unverified_context()
+                # Allow weak certificates and signatures for older devices
+                sslcontext.set_ciphers('DEFAULT:@SECLEVEL=0')
+                sslcontext.check_hostname = False
+                sslcontext.verify_mode = ssl.CERT_NONE
+                
+                # Enable older TLS versions for compatibility with old devices
+                sslcontext.minimum_version = ssl.TLSVersion.TLSv1
+                sslcontext.maximum_version = ssl.TLSVersion.TLSv1_3
+                
+                # Set additional options for compatibility
+                sslcontext.options |= ssl.OP_LEGACY_SERVER_CONNECT
+                
+                try:
+                    sslcontext.load_cert_chain(self._cert_path)
+                except ssl.SSLError as ssl_ex:
+                    _LOGGER.warning("SSL certificate load failed for %s: %s", self._name, ssl_ex)
+                    # Continue without client certificate if loading fails
+                    pass
+                return sslcontext
+            
+            # Create SSL context in executor to avoid blocking
+            sslcontext = await self.hass.async_add_executor_job(create_ssl_context)
+            
+            # Use asyncio to create a raw connection with proper SSL context
             reader, writer = await asyncio.open_connection(
-                self._host, int(self._port), ssl=True
+                self._host, int(self._port), ssl=sslcontext
             )
             
             # Construct manual HTTP request
