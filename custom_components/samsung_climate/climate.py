@@ -104,6 +104,7 @@ class RoomAirConditioner(ClimateEntity):
             HVACMode.OFF
         ]
         self._attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
+        
     async def api_put_data(self, path, data):
         """Send PUT request to the device API."""
         try:
@@ -134,18 +135,27 @@ class RoomAirConditioner(ClimateEntity):
             sslcontext = await self.hass.async_add_executor_job(create_ssl_context)
             
             async with aiohttp.ClientSession() as session:
-                async with session.put(
-                    self._url + path, 
-                    headers=self._headers, 
-                    ssl=sslcontext, 
-                    data=data
-                ) as response:
-                    if response.status != 200:
-                        _LOGGER.error(
-                            "Failed to send command to %s: %s", 
-                            self._name, 
-                            response.status
-                        )
+                try:
+                    async with session.put(
+                        self._url + path, 
+                        headers=self._headers, 
+                        ssl=sslcontext, 
+                        data=data
+                    ) as response:
+                        if response.status != 200:
+                            _LOGGER.error(
+                                "Failed to send command to %s: %s", 
+                                self._name, 
+                                response.status
+                            )
+                except aiohttp.ClientResponseError as resp_error:
+                    if "Invalid header token" in str(resp_error):
+                        _LOGGER.warning("Server sent malformed headers for %s during command, but command may have succeeded", self._name)
+                        # Server responded but with malformed headers - command might have worked
+                        # We can't verify the response but the device is responding
+                    else:
+                        _LOGGER.error("Response error for %s: %s", self._name, resp_error)
+                        raise
         except Exception as ex:
             _LOGGER.error("Error communicating with %s: %s", self._name, ex)
 
@@ -265,37 +275,46 @@ class RoomAirConditioner(ClimateEntity):
             sslcontext = await self.hass.async_add_executor_job(create_ssl_context)
             
             async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    self._url, 
-                    headers=self._headers, 
-                    ssl=sslcontext
-                ) as response:            
-                    if response.status == 200:
-                        result = await response.json()
-                        if len(result.get('Devices', [])) > 0:
-                            device = result['Devices'][0]
-                            if device["Operation"]["power"] == 'On':
-                                self._attr_hvac_mode = AC_MODE_TO_HVAC.get(
-                                    device["Mode"]["modes"][0].lower(), 
-                                    HVACMode.OFF
-                                )
-                            else:
-                                self._attr_hvac_mode = HVACMode.OFF
+                try:
+                    async with session.get(
+                        self._url, 
+                        headers=self._headers, 
+                        ssl=sslcontext
+                    ) as response:            
+                        if response.status == 200:
+                            result = await response.json()
+                            if len(result.get('Devices', [])) > 0:
+                                device = result['Devices'][0]
+                                if device["Operation"]["power"] == 'On':
+                                    self._attr_hvac_mode = AC_MODE_TO_HVAC.get(
+                                        device["Mode"]["modes"][0].lower(), 
+                                        HVACMode.OFF
+                                    )
+                                else:
+                                    self._attr_hvac_mode = HVACMode.OFF
 
-                            if len(device.get("Temperatures", [])) > 0:
-                                temp = device["Temperatures"][0]
-                                self._attr_current_temperature = temp["current"]
-                                self._attr_target_temperature = temp["desired"]
-                                self._attr_temperature_unit = (
-                                    UnitOfTemperature.CELSIUS 
-                                    if temp["unit"] == 'Celsius' 
-                                    else UnitOfTemperature.FAHRENHEIT
-                                )
+                                if len(device.get("Temperatures", [])) > 0:
+                                    temp = device["Temperatures"][0]
+                                    self._attr_current_temperature = temp["current"]
+                                    self._attr_target_temperature = temp["desired"]
+                                    self._attr_temperature_unit = (
+                                        UnitOfTemperature.CELSIUS 
+                                        if temp["unit"] == 'Celsius' 
+                                        else UnitOfTemperature.FAHRENHEIT
+                                    )
+                        else:
+                            _LOGGER.error(
+                                "Failed to update %s: HTTP %s", 
+                                self._name, 
+                                response.status
+                            )
+                except aiohttp.ClientResponseError as resp_error:
+                    if "Invalid header token" in str(resp_error):
+                        _LOGGER.warning("Server sent malformed headers for %s, but device is responding", self._name)
+                        # Server responded but with malformed headers - device is working
+                        # We can't parse the response but at least we know it's alive
                     else:
-                        _LOGGER.error(
-                            "Failed to update %s: HTTP %s", 
-                            self._name, 
-                            response.status
-                        )
+                        _LOGGER.error("Response error for %s: %s", self._name, resp_error)
+                        raise
         except Exception as ex:
             _LOGGER.error("Error updating %s: %s", self._name, ex)
