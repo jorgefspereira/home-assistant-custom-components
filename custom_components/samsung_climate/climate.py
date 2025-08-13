@@ -10,11 +10,17 @@ from homeassistant.components.climate import ClimateEntity
 from homeassistant.components.climate.const import (
     HVACAction,
     HVACMode,
+    FAN_AUTO,
+    FAN_LOW,
+    FAN_MEDIUM,
+    FAN_HIGH,
+    SWING_OFF,
+    SWING_ON,
     ClimateEntityFeature
 )
 from homeassistant.const import (
     UnitOfTemperature, 
-    ATTR_TEMPERATURE
+    ATTR_TEMPERATURE,    
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -47,6 +53,30 @@ HVAC_TO_AC_MODE = {
     HVACMode.FAN_ONLY: "wind",
 }
 
+FAN_TO_AC_MODE = {
+    FAN_AUTO: 0,
+    FAN_LOW: 2,
+    FAN_MEDIUM: 3,
+    FAN_HIGH: 4,
+}
+
+AC_MODE_TO_FAN = {
+    0: FAN_AUTO,
+    2: FAN_LOW,
+    3: FAN_MEDIUM,
+    4: FAN_HIGH,
+}
+
+AC_MODE_TO_SWING = {
+    "Fix": SWING_OFF,
+    "Up_And_Low": SWING_ON,
+}
+
+SWING_TO_AC_MODE = {
+    SWING_OFF: "Fix",
+    SWING_ON: "Up_And_Low",
+}
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -70,7 +100,7 @@ async def async_setup_entry(
     # Create a coordinator for polling
     async def async_update_data():
         """Fetch data from API (this is the polling function)."""
-        _LOGGER.warning("Coordinator polling state for %s", name)
+        # _LOGGER.warning("Coordinator polling state for %s", name)
         result = await _http_request(hass, host, port, token, cert_path)  # We'll define this helper below
         if result and len(result.get('Devices', [])) > 0:
             return result['Devices'][0]  # Return the device data
@@ -191,7 +221,20 @@ class RoomAirConditioner(CoordinatorEntity, ClimateEntity):  # Inherit from Coor
             HVACMode.FAN_ONLY,
             HVACMode.OFF
         ]
-        self._attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
+
+        self._attr_fan_modes = [
+            FAN_AUTO,
+            FAN_LOW,
+            FAN_MEDIUM,
+            FAN_HIGH
+        ]
+
+        self._attr_swing_modes = [
+            SWING_OFF,
+            SWING_ON,
+        ]
+
+        self._attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE | ClimateEntityFeature.FAN_MODE | ClimateEntityFeature.SWING_MODE
         self._attr_should_poll = False  # Disable automatic polling
 
     @property
@@ -235,6 +278,16 @@ class RoomAirConditioner(CoordinatorEntity, ClimateEntity):  # Inherit from Coor
         return self._attr_hvac_modes
 
     @property
+    def fan_mode(self):
+        """Return the fan setting."""
+        return self._attr_fan_mode
+
+    @property
+    def swing_mode(self):
+        """Return the swing setting."""
+        return self._attr_swing_mode
+
+    @property
     def device_info(self):
         """Return device info for registry (helps with deletion and device management)."""
         return {
@@ -245,18 +298,6 @@ class RoomAirConditioner(CoordinatorEntity, ClimateEntity):  # Inherit from Coor
             "sw_version": "1.0",  # Optional
         }
 
-    # @property
-    # def fan_mode(self):
-    #     """Return the fan setting."""
-    #     return self._device.status.fan_mode
-
-    # @property
-    # def fan_modes(self):
-    #     """Return the list of available fan modes."""
-    #     return self._device.status.supported_ac_fan_modes
-
-
-
     async def async_added_to_hass(self):
         """Run when entity is added to hass."""
         await super().async_added_to_hass()
@@ -265,6 +306,7 @@ class RoomAirConditioner(CoordinatorEntity, ClimateEntity):  # Inherit from Coor
     def _handle_coordinator_update(self):
         """Update entity from coordinator data (called on poll)."""
         device = self.coordinator.data
+        
         if device:
             if device["Operation"]["power"] == 'On':
                 self._attr_hvac_mode = AC_MODE_TO_HVAC.get(
@@ -273,6 +315,7 @@ class RoomAirConditioner(CoordinatorEntity, ClimateEntity):  # Inherit from Coor
                 )
             else:
                 self._attr_hvac_mode = HVACMode.OFF
+
             if len(device.get("Temperatures", [])) > 0:
                 temp = device["Temperatures"][0]
                 self._attr_current_temperature = temp["current"]
@@ -282,6 +325,10 @@ class RoomAirConditioner(CoordinatorEntity, ClimateEntity):  # Inherit from Coor
                     if temp["unit"] == 'Celsius' 
                     else UnitOfTemperature.FAHRENHEIT
                 )
+
+            self._attr_swing_mode = AC_MODE_TO_SWING.get(device["Wind"]["direction"], FAN_AUTO)
+            self._attr_fan_mode = AC_MODE_TO_FAN.get(device["Wind"]["speedLevel"], SWING_OFF)
+            
         self.async_write_ha_state()  # Push to HA
 
     # Remove your existing async_update (coordinator handles polling now)
@@ -292,6 +339,54 @@ class RoomAirConditioner(CoordinatorEntity, ClimateEntity):  # Inherit from Coor
             self.hass, self._host, self._port, self._token, self._cert_path,
             method="PUT", path=path, data=data
         )
+    
+    async def async_set_fan_mode(self, fan_mode: str) -> None:
+        """Set new fan mode."""
+        if self._attr_fan_mode == fan_mode:
+            return
+        
+        success = False
+
+        fan_mode = FAN_TO_AC_MODE[fan_mode]
+        success = await self.api_put_data(
+            '/0', 
+            f'{{"Wind" : {{"speedLevel": {fan_mode} }}}}'
+        )
+
+        if success:
+            self._attr_fan_mode = fan_mode
+            self.async_write_ha_state()
+            
+            # Schedule a poll after delay to confirm (avoids race with stale API data)
+            await asyncio.sleep(5)  # Adjust delay based on your API's update time (e.g., 5-10 sec)
+            await self.coordinator.async_request_refresh()
+        else:
+            _LOGGER.error("Failed to set FAN mode for %s", self._name)
+
+
+    async def async_set_swing_mode(self, swing_mode: str) -> None:
+        """Set new swing mode."""
+        if self._attr_swing_mode == swing_mode:
+            return
+        
+        success = False
+
+        swing_mode = SWING_TO_AC_MODE[swing_mode]
+        success = await self.api_put_data(
+            '/0', 
+            f'{{"Wind" : {{"direction": "{swing_mode}" }}}}'
+        )
+
+        if success:
+            self._attr_swing_mode = swing_mode
+            self.async_write_ha_state()
+            
+            # Schedule a poll after delay to confirm (avoids race with stale API data)
+            await asyncio.sleep(5)  # Adjust delay based on your API's update time (e.g., 5-10 sec)
+            await self.coordinator.async_request_refresh()
+        else:
+            _LOGGER.error("Failed to set SWING mode for %s", self._name)
+    
 
     # Update service methods to trigger coordinator refresh after a delay
     async def async_set_temperature(self, **kwargs):
@@ -311,7 +406,7 @@ class RoomAirConditioner(CoordinatorEntity, ClimateEntity):  # Inherit from Coor
                 await asyncio.sleep(5)  # Adjust delay based on your API's update time (e.g., 5-10 sec)
                 await self.coordinator.async_request_refresh()
             else:
-                _LOGGER.error("Failed to set temperature for %s", self._name)
+                _LOGGER.error("Failed to set TEMPERATURE for %s", self._name)
     
     async def async_set_hvac_mode(self, hvac_mode):
         """Set new operation mode."""
