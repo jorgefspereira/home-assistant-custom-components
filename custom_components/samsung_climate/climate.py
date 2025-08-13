@@ -81,7 +81,7 @@ async def async_setup_entry(
         _LOGGER,
         name=f"{DOMAIN}_{config_entry.entry_id}",
         update_method=async_update_data,
-        update_interval=timedelta(minutes=1),  # Poll every 1 minute (adjust as needed; e.g., 5 for less frequent)
+        update_interval=timedelta(seconds=30),  # Poll every 30 seconds (adjust as needed; e.g., 5 for less frequent)
     )
 
     # Refresh once on setup to get initial state
@@ -194,7 +194,68 @@ class RoomAirConditioner(CoordinatorEntity, ClimateEntity):  # Inherit from Coor
         self._attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
         self._attr_should_poll = False  # Disable automatic polling
 
-    # (Keep your properties like supported_features, temperature_unit, etc., as-is)
+    @property
+    def supported_features(self):
+        """Return the list of supported features."""
+        return self._attr_supported_features
+
+    @property
+    def temperature_unit(self):
+        """Return the unit of measurement."""
+        return self._attr_temperature_unit
+
+    @property
+    def name(self):
+        """Return the name of the climate device."""
+        return self._name
+
+    @property
+    def current_temperature(self):
+        """Return the current temperature."""
+        return self._attr_current_temperature
+
+    @property
+    def target_temperature(self):
+        """Return the temperature we try to reach."""
+        return self._attr_target_temperature
+
+    @property
+    def target_temperature_step(self):
+        """Return the supported step of target temperature."""
+        return 1
+
+    @property
+    def hvac_mode(self):
+        """Return current operation ie. heat, cool, idle."""
+        return self._attr_hvac_mode
+
+    @property
+    def hvac_modes(self):
+        """Return the list of available operation modes."""
+        return self._attr_hvac_modes
+
+    @property
+    def device_info(self):
+        """Return device info for registry (helps with deletion and device management)."""
+        return {
+            "identifiers": {(DOMAIN, self._attr_unique_id)},  # Ties to unique_id
+            "name": self._name,
+            "manufacturer": "Samsung",  # Or whatever fits
+            "model": "Room Air Conditioner",  # Customize as needed
+            "sw_version": "1.0",  # Optional
+        }
+
+    # @property
+    # def fan_mode(self):
+    #     """Return the fan setting."""
+    #     return self._device.status.fan_mode
+
+    # @property
+    # def fan_modes(self):
+    #     """Return the list of available fan modes."""
+    #     return self._device.status.supported_ac_fan_modes
+
+
 
     async def async_added_to_hass(self):
         """Run when entity is added to hass."""
@@ -214,7 +275,6 @@ class RoomAirConditioner(CoordinatorEntity, ClimateEntity):  # Inherit from Coor
                 self._attr_hvac_mode = HVACMode.OFF
             if len(device.get("Temperatures", [])) > 0:
                 temp = device["Temperatures"][0]
-                _LOGGER.warning("Updated temperature to B1 %s", temp["desired"])
                 self._attr_current_temperature = temp["current"]
                 self._attr_target_temperature = temp["desired"]
                 self._attr_temperature_unit = (
@@ -238,13 +298,12 @@ class RoomAirConditioner(CoordinatorEntity, ClimateEntity):  # Inherit from Coor
         """Set new target temperatures."""
         if kwargs.get(ATTR_TEMPERATURE) is not None:
             target_temp = kwargs.get(ATTR_TEMPERATURE)
-            _LOGGER.warning("Updated temperature to A1 %s", target_temp)
             success = await self.api_put_data(
                 '/0/temperatures/0', 
                 f'{{"desired": {target_temp} }}'
             )
+
             if success:
-                _LOGGER.warning("Updated temperature to A2 %s", target_temp)
                 self._attr_target_temperature = target_temp
                 self.async_write_ha_state()  # Optimistic push
                 
@@ -280,4 +339,8 @@ class RoomAirConditioner(CoordinatorEntity, ClimateEntity):  # Inherit from Coor
         else:
             _LOGGER.error("Failed to set HVAC mode for %s", self._name)
 
-    # (Remove your _http_request from the class; use the shared one)
+    async def async_will_remove_from_hass(self):
+        """Clean up when entity is removed (optional, but good for future-proofing)."""
+        await super().async_will_remove_from_hass()
+        # Add any cleanup here, e.g., if you have listeners or connections to close
+        _LOGGER.debug(f"Entity {self.entity_id} is being removed")
