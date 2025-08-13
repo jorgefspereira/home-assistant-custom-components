@@ -306,7 +306,7 @@ class RoomAirConditioner(CoordinatorEntity, ClimateEntity):  # Inherit from Coor
     def _handle_coordinator_update(self):
         """Update entity from coordinator data (called on poll)."""
         device = self.coordinator.data
-        
+
         if device:
             if device["Operation"]["power"] == 'On':
                 self._attr_hvac_mode = AC_MODE_TO_HVAC.get(
@@ -326,8 +326,8 @@ class RoomAirConditioner(CoordinatorEntity, ClimateEntity):  # Inherit from Coor
                     else UnitOfTemperature.FAHRENHEIT
                 )
 
-            self._attr_swing_mode = AC_MODE_TO_SWING.get(device["Wind"]["direction"], FAN_AUTO)
-            self._attr_fan_mode = AC_MODE_TO_FAN.get(device["Wind"]["speedLevel"], SWING_OFF)
+            self._attr_swing_mode = AC_MODE_TO_SWING.get(device["Wind"]["direction"], SWING_OFF)
+            self._attr_fan_mode = AC_MODE_TO_FAN.get(device["Wind"]["speedLevel"], FAN_AUTO)
             
         self.async_write_ha_state()  # Push to HA
 
@@ -347,10 +347,10 @@ class RoomAirConditioner(CoordinatorEntity, ClimateEntity):  # Inherit from Coor
         
         success = False
 
-        fan_mode = FAN_TO_AC_MODE[fan_mode]
+        fan_mode_ac = FAN_TO_AC_MODE[fan_mode]
         success = await self.api_put_data(
             '/0', 
-            f'{{"Wind" : {{"speedLevel": {fan_mode} }}}}'
+            f'{{"Wind" : {{"speedLevel": {fan_mode_ac} }}}}'
         )
 
         if success:
@@ -371,10 +371,10 @@ class RoomAirConditioner(CoordinatorEntity, ClimateEntity):  # Inherit from Coor
         
         success = False
 
-        swing_mode = SWING_TO_AC_MODE[swing_mode]
+        swing_mode_ac = SWING_TO_AC_MODE[swing_mode]
         success = await self.api_put_data(
             '/0', 
-            f'{{"Wind" : {{"direction": "{swing_mode}" }}}}'
+            f'{{"Wind" : {{"direction": "{swing_mode_ac}" }}}}'
         )
 
         if success:
